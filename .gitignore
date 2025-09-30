@@ -1,0 +1,37 @@
+# API Keys and Sensitive Data
+config.php
+
+# Cache and Storage
+storage/cache/*
+!storage/cache/.gitkeep
+storage/history.jsonl
+
+# Output files
+output/
+!output/.gitkeep
+
+# System files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+error_log
+debug.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
