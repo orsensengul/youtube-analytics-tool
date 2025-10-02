@@ -220,6 +220,18 @@ CREATE TABLE IF NOT EXISTS `api_usage_stats` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
+-- 11. ANALYSIS PROMPTS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS `analysis_prompts` (
+  `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `analysis_type` VARCHAR(100) NOT NULL UNIQUE COMMENT 'descriptions, tags, titles, seo, etc.',
+  `prompt_template` TEXT NOT NULL COMMENT 'The prompt template for this analysis type',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_analysis_type (`analysis_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================
 -- INITIAL DATA
 -- ============================================
 
@@ -227,6 +239,19 @@ CREATE TABLE IF NOT EXISTS `api_usage_stats` (
 -- Note: Change this immediately after installation!
 INSERT IGNORE INTO `users` (`username`, `email`, `password_hash`, `full_name`, `role`)
 VALUES ('admin', 'admin@ymt-lokal.local', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'Administrator', 'admin');
+
+-- Insert default analysis prompt templates
+INSERT IGNORE INTO `analysis_prompts` (`analysis_type`, `prompt_template`) VALUES
+('descriptions', 'JSON içindeki description alanlarını incele.\n- Benzerlikler, farklılıklar, ortak temalar\n- SEO ve YouTube aranma açısından güçlü/zayıf yönler\n- Geliştirme önerileri\n- 2-3 örnek optimize açıklama şablonu\nKısa, maddeli ve somut öneriler ver.'),
+('tags', 'JSON içindeki tags alanlarını analiz et.\n- En çok kullanılan etiketler, kümeler\n- Eksik/hatalı etiketler ve öneriler\n- Aranma niyeti (intent) odaklı tag önerileri\n- 10-20 yeni öneri tag listesi (TR odaklı)'),
+('titles', 'JSON içindeki title alanlarını analiz et.\n- Öne çıkan kalıplar\n- CTR''ı artırma önerileri\n- 5-10 örnek yeni başlık önerisi'),
+('seo', 'Kapsamlı SEO özeti çıkar: title, description, tags, izlenme metriklerine göre genel değerlendirme ve hızlı kazanım önerileri. Maddelerle yaz.'),
+('auto-title-generator', 'JSON''daki başarılı başlıkları analiz et ve 20 farklı yeni başlık önerisi üret.\n- 5 clickbait tarzı\n- 5 profesyonel tarzı\n- 5 eğitsel tarzı\n- 5 merak uyandıran tarzı\nHer birini numaralandır ve kategorize et.'),
+('performance-prediction', 'İzlenme verilerini analiz et ve performans tahminleri yap.\n- En iyi performans gösteren içerik özellikleri\n- Başarı olasılığı yüksek içerik tipleri\n- Risk faktörleri\n- Gelecek içerikler için öneriler'),
+('content-gaps', 'İçerik boşluklarını tespit et.\n- Eksik kalan konu alanları\n- Potansiyel fırsatlar\n- Rakiplerin kullandığı ama burada olmayan konular\n- 10-15 yeni içerik fikri önerisi'),
+('trending-topics', 'Yüksek izlenme alan videoların ortak temalarını tespit et.\n- Popüler konular ve trendler\n- Hangi konular daha çok ilgi görüyor\n- Trend takip önerileri\n- Güncel trendlere uyum stratejileri'),
+('engagement-rate', 'Etkileşim oranlarını değerlendir.\n- Like/View oranı analizi\n- En çok etkileşim alan içerik özellikleri\n- Etkileşim artırma stratejileri\n- Topluluk oluşturma önerileri'),
+('best-performers', 'En yüksek izlenmeye sahip videoları analiz et.\n- Ortak başarı faktörleri\n- Başlık, açıklama, tag paternleri\n- Tekrarlanabilir başarı formülü\n- 5-10 somut uygulama önerisi');
 
 -- ============================================
 -- CLEANUP QUERIES (for maintenance)

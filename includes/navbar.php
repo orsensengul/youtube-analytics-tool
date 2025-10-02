@@ -42,6 +42,9 @@ function navIsActive(string $page): string {
         <a class="text-sm px-4 py-2 rounded-md border <?= navIsActive('history') ?>" href="history.php">
             📜 Geçmiş
         </a>
+        <a class="text-sm px-4 py-2 rounded-md border <?= navIsActive('settings') ?>" href="settings.php">
+            ⚙️ Ayarlar
+        </a>
 
         <!-- Divider -->
         <div class="border-l border-gray-300 h-8 mx-2"></div>

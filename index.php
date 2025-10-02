@@ -177,8 +177,8 @@ if ($query !== '') {
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="assets/styles.css">
 </head>
-<body>
-    <div class="container mx-auto max-w-6xl p-4">
+<body class="bg-gray-50">
+    <div class="container mx-auto max-w-6xl px-4 py-6">
         <?php include __DIR__ . '/includes/navbar.php'; ?>
 
         <div class="flex items-center justify-between mb-3">

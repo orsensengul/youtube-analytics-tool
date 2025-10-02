@@ -164,40 +164,54 @@ function getAnalysisTypeLabel(string $type): string {
 function build_prompt(string $type, array $data, string $mode): string {
     $intro = "Aşağıda $mode için 'items' listesinden 30 öğeye kadar özet alanlar var. Türkçe ve maddeler halinde net analiz üret.";
     $jsonPart = json_encode($data, JSON_UNESCAPED_UNICODE);
-    switch ($type) {
-        case 'descriptions':
-            $task = "JSON içindeki description alanlarını incele.\n- Benzerlikler, farklılıklar, ortak temalar\n- SEO ve YouTube aranma açısından güçlü/zayıf yönler\n- Geliştirme önerileri\n- 2-3 örnek optimize açıklama şablonu\nKısa, maddeli ve somut öneriler ver.";
-            break;
-        case 'tags':
-            $task = "JSON içindeki tags alanlarını analiz et.\n- En çok kullanılan etiketler, kümeler\n- Eksik/hatalı etiketler ve öneriler\n- Aranma niyeti (intent) odaklı tag önerileri\n- 10-20 yeni öneri tag listesi (TR odaklı)";
-            break;
-        case 'titles':
-            $task = "JSON içindeki title alanlarını analiz et.\n- Öne çıkan kalıplar\n- CTR'ı artırma önerileri\n- 5-10 örnek yeni başlık önerisi";
-            break;
-        case 'seo':
-            $task = "Kapsamlı SEO özeti çıkar: title, description, tags, izlenme metriklerine göre genel değerlendirme ve hızlı kazanım önerileri. Maddelerle yaz.";
-            break;
-        case 'auto-title-generator':
-            $task = "JSON'daki başarılı başlıkları analiz et ve 20 farklı yeni başlık önerisi üret.\n- 5 clickbait tarzı\n- 5 profesyonel tarzı\n- 5 eğitsel tarzı\n- 5 merak uyandıran tarzı\nHer birini numaralandır ve kategorize et.";
-            break;
-        case 'performance-prediction':
-            $task = "İzlenme verilerini analiz et ve performans tahminleri yap.\n- En iyi performans gösteren içerik özellikleri\n- Başarı olasılığı yüksek içerik tipleri\n- Risk faktörleri\n- Gelecek içerikler için öneriler";
-            break;
-        case 'content-gaps':
-            $task = "İçerik boşluklarını tespit et.\n- Eksik kalan konu alanları\n- Potansiyel fırsatlar\n- Rakiplerin kullandığı ama burada olmayan konular\n- 10-15 yeni içerik fikri önerisi";
-            break;
-        case 'trending-topics':
-            $task = "Yüksek izlenme alan videoların ortak temalarını tespit et.\n- Popüler konular ve trendler\n- Hangi konular daha çok ilgi görüyor\n- Trend takip önerileri\n- Güncel trendlere uyum stratejileri";
-            break;
-        case 'engagement-rate':
-            $task = "Etkileşim oranlarını değerlendir.\n- Like/View oranı analizi\n- En çok etkileşim alan içerik özellikleri\n- Etkileşim artırma stratejileri\n- Topluluk oluşturma önerileri";
-            break;
-        case 'best-performers':
-            $task = "En yüksek izlenmeye sahip videoları analiz et.\n- Ortak başarı faktörleri\n- Başlık, açıklama, tag paternleri\n- Tekrarlanabilir başarı formülü\n- 5-10 somut uygulama önerisi";
-            break;
-        default:
-            $task = "Genel analiz yap.";
+
+    // Try to load task from database
+    $task = '';
+    $promptResult = Database::select(
+        "SELECT prompt_template FROM analysis_prompts WHERE analysis_type = ? LIMIT 1",
+        [$type]
+    );
+
+    if (!empty($promptResult)) {
+        $task = $promptResult[0]['prompt_template'];
+    } else {
+        // Fallback to hardcoded defaults if not in database
+        switch ($type) {
+            case 'descriptions':
+                $task = "JSON içindeki description alanlarını incele.\n- Benzerlikler, farklılıklar, ortak temalar\n- SEO ve YouTube aranma açısından güçlü/zayıf yönler\n- Geliştirme önerileri\n- 2-3 örnek optimize açıklama şablonu\nKısa, maddeli ve somut öneriler ver.";
+                break;
+            case 'tags':
+                $task = "JSON içindeki tags alanlarını analiz et.\n- En çok kullanılan etiketler, kümeler\n- Eksik/hatalı etiketler ve öneriler\n- Aranma niyeti (intent) odaklı tag önerileri\n- 10-20 yeni öneri tag listesi (TR odaklı)";
+                break;
+            case 'titles':
+                $task = "JSON içindeki title alanlarını analiz et.\n- Öne çıkan kalıplar\n- CTR'ı artırma önerileri\n- 5-10 örnek yeni başlık önerisi";
+                break;
+            case 'seo':
+                $task = "Kapsamlı SEO özeti çıkar: title, description, tags, izlenme metriklerine göre genel değerlendirme ve hızlı kazanım önerileri. Maddelerle yaz.";
+                break;
+            case 'auto-title-generator':
+                $task = "JSON'daki başarılı başlıkları analiz et ve 20 farklı yeni başlık önerisi üret.\n- 5 clickbait tarzı\n- 5 profesyonel tarzı\n- 5 eğitsel tarzı\n- 5 merak uyandıran tarzı\nHer birini numaralandır ve kategorize et.";
+                break;
+            case 'performance-prediction':
+                $task = "İzlenme verilerini analiz et ve performans tahminleri yap.\n- En iyi performans gösteren içerik özellikleri\n- Başarı olasılığı yüksek içerik tipleri\n- Risk faktörleri\n- Gelecek içerikler için öneriler";
+                break;
+            case 'content-gaps':
+                $task = "İçerik boşluklarını tespit et.\n- Eksik kalan konu alanları\n- Potansiyel fırsatlar\n- Rakiplerin kullandığı ama burada olmayan konular\n- 10-15 yeni içerik fikri önerisi";
+                break;
+            case 'trending-topics':
+                $task = "Yüksek izlenme alan videoların ortak temalarını tespit et.\n- Popüler konular ve trendler\n- Hangi konular daha çok ilgi görüyor\n- Trend takip önerileri\n- Güncel trendlere uyum stratejileri";
+                break;
+            case 'engagement-rate':
+                $task = "Etkileşim oranlarını değerlendir.\n- Like/View oranı analizi\n- En çok etkileşim alan içerik özellikleri\n- Etkileşim artırma stratejileri\n- Topluluk oluşturma önerileri";
+                break;
+            case 'best-performers':
+                $task = "En yüksek izlenmeye sahip videoları analiz et.\n- Ortak başarı faktörleri\n- Başlık, açıklama, tag paternleri\n- Tekrarlanabilir başarı formülü\n- 5-10 somut uygulama önerisi";
+                break;
+            default:
+                $task = "Genel analiz yap.";
+        }
     }
+
     return "$intro\n\nVeri (JSON):\n$jsonPart\n\nGörev:\n$task";
 }
 
@@ -519,8 +533,8 @@ if ($result && $saving) {
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="assets/styles.css">
 </head>
-<body>
-<div class="container mx-auto max-w-5xl p-4">
+<body class="bg-gray-50">
+<div class="container mx-auto max-w-6xl px-4 py-6">
     <?php include __DIR__ . '/includes/navbar.php'; ?>
 
     <?php if ($back): ?>
