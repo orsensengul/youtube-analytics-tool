@@ -4,11 +4,18 @@ declare(strict_types=1);
 $config = require __DIR__ . '/config.php';
 require_once __DIR__ . '/lib/Database.php';
 require_once __DIR__ . '/lib/Auth.php';
+require_once __DIR__ . '/lib/AIProvider.php';
 
 // Initialize database and session
 Database::init($config['database']);
 Auth::startSession($config['session']);
 Auth::requireLogin();
+
+// Initialize AI Provider with fallback support
+$aiProvider = new AIProvider(
+    $config['ai_providers'],
+    $config['ai_error_reset_time']
+);
 
 function e(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); }
 function slugify(string $s): string {
@@ -217,181 +224,149 @@ function build_prompt(string $type, array $data, string $mode): string {
 
 // Handle custom prompt or follow-up
 if ($customPrompt && $limited && (!$saving || $result === '')) {
-    if (!$aiKey || $aiKey === 'YOUR_CODEFAST_API_KEY') {
-        $error = 'Lütfen config.php içinde ai_api_key değerini ayarlayın.';
-    } elseif (!$aiEndpoint || !$aiModel) {
-        $error = 'AI endpoint/model yapılandırması eksik.';
+    $payloadData = [];
+    foreach ($limited as $it) {
+        $payloadData[] = [
+            'title' => $it['title'] ?? '',
+            'description' => $it['description'] ?? '',
+            'tags' => $it['tags'] ?? [],
+            'views' => $it['metrics']['views'] ?? null,
+        ];
+    }
+
+    // Build messages array with chat history
+    $messages = [];
+
+    // Add context about the data
+    $dataContext = "Video verileri:\n" . json_encode($payloadData, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    $messages[] = ['role' => 'system', 'content' => 'Sen YouTube videolarını analiz eden bir uzmansın. Türkçe ve maddeler halinde net analizler yaparsın.'];
+    $messages[] = ['role' => 'user', 'content' => $dataContext];
+    $messages[] = ['role' => 'assistant', 'content' => 'Video verilerini aldım. Nasıl yardımcı olabilirim?'];
+
+    // Add custom prompt
+    $messages[] = ['role' => 'user', 'content' => $customPrompt];
+
+    // Make API request with automatic fallback
+    $apiResult = $aiProvider->request($messages);
+
+    if ($apiResult['success']) {
+        $result = $apiResult['data'];
+
+        // Save to chat history
+        $_SESSION['chat_history'][] = ['role' => 'user', 'content' => $customPrompt];
+        $_SESSION['chat_history'][] = ['role' => 'assistant', 'content' => $result];
+        $chatHistory = $_SESSION['chat_history'];
     } else {
-        $payloadData = [];
-        foreach ($limited as $it) {
-            $payloadData[] = [
-                'title' => $it['title'] ?? '',
-                'description' => $it['description'] ?? '',
-                'tags' => $it['tags'] ?? [],
-                'views' => $it['metrics']['views'] ?? null,
-            ];
-        }
-
-        // Build messages array with chat history
-        $messages = [];
-
-        // Add context about the data
-        $dataContext = "Video verileri:\n" . json_encode($payloadData, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-        $messages[] = ['role' => 'system', 'content' => 'Sen YouTube videolarını analiz eden bir uzmansın. Türkçe ve maddeler halinde net analizler yaparsın.'];
-        $messages[] = ['role' => 'user', 'content' => $dataContext];
-        $messages[] = ['role' => 'assistant', 'content' => 'Video verilerini aldım. Nasıl yardımcı olabilirim?'];
-
-        // Add custom prompt
-        $messages[] = ['role' => 'user', 'content' => $customPrompt];
-
-        // Make API request
-        $body = json_encode([
-            'model' => $aiModel,
-            'messages' => $messages,
-            'stream' => false,
-        ], JSON_UNESCAPED_UNICODE);
-
-        $startTime = microtime(true);
-        $ch = curl_init($aiEndpoint);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => $body,
-            CURLOPT_HTTPHEADER => [
-                'Authorization: Bearer ' . $aiKey,
-                'Content-Type: application/json',
-                'Accept: application/json',
-            ],
-            CURLOPT_TIMEOUT => 60,
-        ]);
-        $resp = curl_exec($ch);
-        $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $err = curl_error($ch);
-        curl_close($ch);
-
-        if ($err) {
-            $error = 'AI isteği hata: ' . $err;
-        } elseif ($http >= 400) {
-            $error = 'AI HTTP hata: ' . $http . ' ' . $resp;
-        } else {
-            $data = json_decode($resp, true);
-            $content = $data['choices'][0]['message']['content'] ?? '';
-            $result = is_string($content) ? $content : json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
-
-            // Save to chat history
-            $_SESSION['chat_history'][] = ['role' => 'user', 'content' => $customPrompt];
-            $_SESSION['chat_history'][] = ['role' => 'assistant', 'content' => $result];
-            $chatHistory = $_SESSION['chat_history'];
-        }
+        $error = 'AI isteği başarısız oldu: ' . $apiResult['error'];
     }
 }
 
 // Handle follow-up question
 if ($followUp && !empty($chatHistory)) {
-    if (!$aiKey || $aiKey === 'YOUR_CODEFAST_API_KEY') {
-        $error = 'Lütfen config.php içinde ai_api_key değerini ayarlayın.';
-    } elseif (!$aiEndpoint || !$aiModel) {
-        $error = 'AI endpoint/model yapılandırması eksik.';
+    // Build messages from chat history + new follow-up
+    $messages = [];
+    $messages[] = ['role' => 'system', 'content' => 'Sen YouTube videolarını analiz eden bir uzmansın. Türkçe ve maddeler halinde net analizler yaparsın.'];
+
+    foreach ($chatHistory as $msg) {
+        $messages[] = $msg;
+    }
+
+    $messages[] = ['role' => 'user', 'content' => $followUp];
+
+    // Make API request with automatic fallback
+    $apiResult = $aiProvider->request($messages);
+
+    if ($apiResult['success']) {
+        $result = $apiResult['data'];
+
+        // Save to chat history
+        $_SESSION['chat_history'][] = ['role' => 'user', 'content' => $followUp];
+        $_SESSION['chat_history'][] = ['role' => 'assistant', 'content' => $result];
+        $chatHistory = $_SESSION['chat_history'];
     } else {
-        // Build messages from chat history + new follow-up
-        $messages = [];
-        $messages[] = ['role' => 'system', 'content' => 'Sen YouTube videolarını analiz eden bir uzmansın. Türkçe ve maddeler halinde net analizler yaparsın.'];
-
-        foreach ($chatHistory as $msg) {
-            $messages[] = $msg;
-        }
-
-        $messages[] = ['role' => 'user', 'content' => $followUp];
-
-        // Make API request
-        $body = json_encode([
-            'model' => $aiModel,
-            'messages' => $messages,
-            'stream' => false,
-        ], JSON_UNESCAPED_UNICODE);
-
-        $ch = curl_init($aiEndpoint);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => $body,
-            CURLOPT_HTTPHEADER => [
-                'Authorization: Bearer ' . $aiKey,
-                'Content-Type: application/json',
-                'Accept: application/json',
-            ],
-            CURLOPT_TIMEOUT => 60,
-        ]);
-        $resp = curl_exec($ch);
-        $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $err = curl_error($ch);
-        curl_close($ch);
-
-        if ($err) {
-            $error = 'AI isteği hata: ' . $err;
-        } elseif ($http >= 400) {
-            $error = 'AI HTTP hata: ' . $http . ' ' . $resp;
-        } else {
-            $data = json_decode($resp, true);
-            $content = $data['choices'][0]['message']['content'] ?? '';
-            $result = is_string($content) ? $content : json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
-
-            // Save to chat history
-            $_SESSION['chat_history'][] = ['role' => 'user', 'content' => $followUp];
-            $_SESSION['chat_history'][] = ['role' => 'assistant', 'content' => $result];
-            $chatHistory = $_SESSION['chat_history'];
-        }
+        $error = 'AI isteği başarısız oldu: ' . $apiResult['error'];
     }
 }
 
 if ($analysisType && $limited && (!$saving || $result === '')) {
-    if (!$aiKey || $aiKey === 'YOUR_CODEFAST_API_KEY') {
-        $error = 'Lütfen config.php içinde ai_api_key değerini ayarlayın.';
-    } elseif (!$aiEndpoint || !$aiModel) {
-        $error = 'AI endpoint/model yapılandırması eksik.';
-    } else {
-        $payloadData = [];
-        foreach ($limited as $it) {
-            $payloadData[] = [
-                'title' => $it['title'] ?? '',
-                'description' => $it['description'] ?? '',
-                'tags' => $it['tags'] ?? [],
-                'views' => $it['metrics']['views'] ?? null,
+    $payloadData = [];
+    foreach ($limited as $it) {
+        $payloadData[] = [
+            'title' => $it['title'] ?? '',
+            'description' => $it['description'] ?? '',
+            'tags' => $it['tags'] ?? [],
+            'views' => $it['metrics']['views'] ?? null,
+        ];
+    }
+    $prompt = build_prompt($analysisType, $payloadData, $mode ?: 'search');
+
+    // Create cache key from analysis parameters
+    $cacheKeyData = [
+        'type' => $analysisType,
+        'mode' => $mode,
+        'data' => $payloadData,
+    ];
+    $cacheKey = 'analysis_' . md5(json_encode($cacheKeyData, JSON_UNESCAPED_UNICODE));
+
+    // Check cache first
+    $userId = Auth::user()['id'] ?? null;
+    $cached = Database::select(
+        "SELECT response_data, created_at FROM api_cache
+         WHERE cache_key = ? AND cache_type = 'search' AND expires_at > NOW()
+         LIMIT 1",
+        [$cacheKey]
+    );
+
+    if (!empty($cached)) {
+        // Use cached result
+        $cacheData = json_decode($cached[0]['response_data'], true);
+        $result = $cacheData['result'] ?? '';
+        $cacheAge = time() - strtotime($cached[0]['created_at']);
+        $cacheMinutes = round($cacheAge / 60);
+        $error = "✅ Cache'den yüklendi ($cacheMinutes dakika önce)";
+
+        // Update cache hit count and last accessed
+        $pdo = Database::getInstance();
+        $stmt = $pdo->prepare("UPDATE api_cache SET hit_count = hit_count + 1, last_accessed = NOW() WHERE cache_key = ?");
+        $stmt->execute([$cacheKey]);
+
+        // Initialize chat history with cached result
+        if ($result) {
+            $dataContext = "Video verileri:\n" . json_encode($payloadData, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+            $systemMsg = "Sen YouTube videolarını analiz eden bir uzmansın. Kullanıcının verdiği video verilerini analiz edip Türkçe olarak detaylı raporlar sunuyorsun.";
+
+            $_SESSION['chat_history'] = [
+                ['role' => 'system', 'content' => $systemMsg],
+                ['role' => 'user', 'content' => $dataContext],
+                ['role' => 'assistant', 'content' => 'Video verilerini aldım. Nasıl yardımcı olabilirim?'],
+                ['role' => 'user', 'content' => $prompt],
+                ['role' => 'assistant', 'content' => $result]
             ];
         }
-        $prompt = build_prompt($analysisType, $payloadData, $mode ?: 'search');
+    } else {
+        // No cache, make API request with automatic fallback
+        $messages = [['role' => 'user', 'content' => $prompt]];
+        $apiResult = $aiProvider->request($messages);
 
-        // Create cache key from analysis parameters
-        $cacheKeyData = [
-            'type' => $analysisType,
-            'mode' => $mode,
-            'data' => $payloadData,
-        ];
-        $cacheKey = 'analysis_' . md5(json_encode($cacheKeyData, JSON_UNESCAPED_UNICODE));
+        if ($apiResult['success']) {
+            $result = $apiResult['data'];
 
-        // Check cache first
-        $userId = Auth::user()['id'] ?? null;
-        $cached = Database::select(
-            "SELECT response_data, created_at FROM api_cache
-             WHERE cache_key = ? AND cache_type = 'search' AND expires_at > NOW()
-             LIMIT 1",
-            [$cacheKey]
-        );
+            // Store in cache (6 hours TTL)
+            try {
+                Database::insert('api_cache', [
+                    'user_id' => $userId,
+                    'cache_key' => $cacheKey,
+                    'cache_type' => 'search',
+                    'provider' => 'ai_provider',
+                    'request_params' => json_encode($cacheKeyData, JSON_UNESCAPED_UNICODE),
+                    'response_data' => json_encode(['result' => $result], JSON_UNESCAPED_UNICODE),
+                    'ttl_seconds' => 21600, // 6 hours
+                ]);
+            } catch (Exception $e) {
+                // Cache save failed, but don't break the flow
+            }
 
-        if (!empty($cached)) {
-            // Use cached result
-            $cacheData = json_decode($cached[0]['response_data'], true);
-            $result = $cacheData['result'] ?? '';
-            $cacheAge = time() - strtotime($cached[0]['created_at']);
-            $cacheMinutes = round($cacheAge / 60);
-            $error = "✅ Cache'den yüklendi ($cacheMinutes dakika önce)";
-
-            // Update cache hit count and last accessed
-            $pdo = Database::getInstance();
-            $stmt = $pdo->prepare("UPDATE api_cache SET hit_count = hit_count + 1, last_accessed = NOW() WHERE cache_key = ?");
-            $stmt->execute([$cacheKey]);
-
-            // Initialize chat history with cached result
+            // Initialize chat history with this button-based analysis
             if ($result) {
                 $dataContext = "Video verileri:\n" . json_encode($payloadData, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
                 $systemMsg = "Sen YouTube videolarını analiz eden bir uzmansın. Kullanıcının verdiği video verilerini analiz edip Türkçe olarak detaylı raporlar sunuyorsun.";
@@ -405,71 +380,7 @@ if ($analysisType && $limited && (!$saving || $result === '')) {
                 ];
             }
         } else {
-            // No cache, make API request
-            $body = json_encode([
-                'model' => $aiModel,
-                'messages' => [[ 'role' => 'user', 'content' => $prompt ]],
-                'stream' => false,
-            ], JSON_UNESCAPED_UNICODE);
-
-            $startTime = microtime(true);
-            $ch = curl_init($aiEndpoint);
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_POST => true,
-                CURLOPT_POSTFIELDS => $body,
-                CURLOPT_HTTPHEADER => [
-                    'Authorization: Bearer ' . $aiKey,
-                    'Content-Type: application/json',
-                    'Accept: application/json',
-                ],
-                CURLOPT_TIMEOUT => 60,
-            ]);
-            $resp = curl_exec($ch);
-            $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $err = curl_error($ch);
-            curl_close($ch);
-            $processingTime = round((microtime(true) - $startTime) * 1000);
-
-            if ($err) {
-                $error = 'AI isteği hata: ' . $err;
-            } elseif ($http >= 400) {
-                $error = 'AI HTTP hata: ' . $http . ' ' . $resp;
-            } else {
-                $data = json_decode($resp, true);
-                $content = $data['choices'][0]['message']['content'] ?? '';
-                $result = is_string($content) ? $content : json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
-
-                // Store in cache (6 hours TTL)
-                try {
-                    Database::insert('api_cache', [
-                        'user_id' => $userId,
-                        'cache_key' => $cacheKey,
-                        'cache_type' => 'search',
-                        'provider' => 'codefast',
-                        'request_params' => json_encode($cacheKeyData, JSON_UNESCAPED_UNICODE),
-                        'response_data' => json_encode(['result' => $result], JSON_UNESCAPED_UNICODE),
-                        'ttl_seconds' => 21600, // 6 hours
-                    ]);
-                } catch (Exception $e) {
-                    // Cache save failed, but don't break the flow
-                }
-            }
-        }
-
-        // Initialize chat history with this button-based analysis
-        if ($result) {
-            $dataContext = "Video verileri:\n" . json_encode($payloadData, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-            $systemMsg = "Sen YouTube videolarını analiz eden bir uzmansın. Kullanıcının verdiği video verilerini analiz edip Türkçe olarak detaylı raporlar sunuyorsun.";
-
-            // Build chat history as if it was a conversation
-            $_SESSION['chat_history'] = [
-                ['role' => 'system', 'content' => $systemMsg],
-                ['role' => 'user', 'content' => $dataContext],
-                ['role' => 'assistant', 'content' => 'Video verilerini aldım. Nasıl yardımcı olabilirim?'],
-                ['role' => 'user', 'content' => $prompt],
-                ['role' => 'assistant', 'content' => $result]
-            ];
+            $error = 'AI isteği başarısız oldu: ' . $apiResult['error'];
         }
     }
 }
