@@ -2,9 +2,16 @@
 declare(strict_types=1);
 
 $config = require __DIR__ . '/config.php';
+require_once __DIR__ . '/lib/Database.php';
+require_once __DIR__ . '/lib/Auth.php';
 require_once __DIR__ . '/lib/Cache.php';
 require_once __DIR__ . '/lib/History.php';
 require_once __DIR__ . '/services/YoutubeService.php';
+
+// Initialize database and session
+Database::init($config['database']);
+Auth::startSession($config['session']);
+Auth::requireLogin();
 
 function e(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); }
 
@@ -70,7 +77,7 @@ $results = [];
 $tagsByVideo = [];
 $detailsMap = [];
 $fromCache = false;
-$history = new History(__DIR__ . '/storage');
+$history = new History(Auth::userId());
 
 if ($query !== '') {
     if (!$rapidKey || $rapidKey === 'YOUR_RAPIDAPI_KEY') {
@@ -172,17 +179,21 @@ if ($query !== '') {
 </head>
 <body>
     <div class="container mx-auto max-w-6xl p-4">
+        <?php include __DIR__ . '/includes/navbar.php'; ?>
+
         <div class="flex items-center justify-between mb-3">
-            <h1 class="text-xl text-gray-900 font-semibold">YouTube Arama</h1>
-            <div class="flex items-center gap-2">
-                <?php if ($query !== '' && !$error): ?>
-                    <button class="px-3 py-1 rounded-md border border-gray-300 bg-gray-100 text-gray-800 hover:bg-gray-200" type="button" onclick="exportSearch('short')">Kısa JSON'u Kaydet</button>
-                    <button class="px-3 py-1 rounded-md border border-gray-300 bg-gray-100 text-gray-800 hover:bg-gray-200" type="button" onclick="exportSearch('full')">Uzun JSON'u Kaydet</button>
-                    <button class="px-3 py-1 rounded-md border border-gray-300 bg-gray-100 text-gray-800 hover:bg-gray-200" type="button" onclick="analyzeSearchNow()">Kısa JSON'u Analiz Et</button>
-                <?php endif; ?>
-                <a class="text-sm px-3 py-1 rounded-md border border-gray-300 bg-gray-100 text-gray-800 hover:bg-gray-200" href="history.php">Geçmiş</a>
-            </div>
+            <?php if ($query !== '' && !$error): ?>
+                <h2 class="text-lg font-medium text-gray-700">Sonuçlar: "<?= e($query) ?>"</h2>
+                <div class="flex gap-2">
+                    <button class="px-3 py-1 rounded-md border border-gray-300 bg-gray-100 text-gray-800 hover:bg-gray-200" type="button" onclick="exportSearch('short')">Kısa JSON Kaydet</button>
+                    <button class="px-3 py-1 rounded-md border border-gray-300 bg-gray-100 text-gray-800 hover:bg-gray-200" type="button" onclick="exportSearch('full')">Uzun JSON Kaydet</button>
+                    <button class="px-3 py-1 rounded-md border border-indigo-300 bg-indigo-600 text-white hover:bg-indigo-500" type="button" onclick="analyzeSearchNow()">📊 Analiz Et</button>
+                </div>
+            <?php else: ?>
+                <h2 class="text-lg font-medium text-gray-700">YouTube Video Arama</h2>
+            <?php endif; ?>
         </div>
+
         <form method="get" class="search-form flex gap-2 items-center mb-4">
             <input class="flex-1 px-3 py-2 rounded-md border border-slate-700 bg-slate-900 text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600" type="text" name="q" placeholder="Aramak istediğiniz kelime" value="<?= e($query) ?>" required>
             <select id="sortSelect" name="sort" title="Sırala" class="sort-select px-3 py-2 rounded-md border border-slate-700 bg-slate-900 text-slate-100">
