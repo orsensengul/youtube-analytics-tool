@@ -94,7 +94,60 @@ if ($query !== '') {
             $results = $cached['results'] ?? [];
             $detailsMap = $cached['detailsMap'] ?? [];
             $tagsByVideo = $cached['tagsByVideo'] ?? [];
-            // Sunucu tarafı sıralamayı kaldırıyoruz; istemci tarafı halleder
+
+            // Cache'den gelen sonuçlar için de JSON kaydet
+            $nowIso = date('c');
+            $shortItems = [];
+            $fullItems = [];
+            foreach ($results as $item) {
+                $id = $item['id']['videoId'] ?? ($item['videoId'] ?? ($item['id'] ?? ($item['video']['videoId'] ?? null)));
+                if (!$id) continue;
+                $sn = $item['snippet'] ?? [];
+                $title = $sn ? ($sn['title'] ?? '') : ($item['title'] ?? '');
+                $chanTitle = $sn ? ($sn['channelTitle'] ?? '') : ($item['channelTitle'] ?? ($item['channel']['title'] ?? ''));
+                $chanId = $sn['channelId'] ?? ($item['channelId'] ?? ($item['channel']['channelId'] ?? null));
+                $detail = $detailsMap[$id] ?? [];
+                $desc = $detail['description'] ?? ($detail['video']['description'] ?? ($sn['description'] ?? ($item['description'] ?? null)));
+                $tags = $tagsByVideo[$id] ?? [];
+                $pubIso = $detail['publishDate'] ?? ($detail['uploadDate'] ?? ($sn['publishedAt'] ?? null));
+                $display = $item['publishedTimeText'] ?? ($item['publishedText'] ?? ($sn['publishedAt'] ?? null));
+                $views = (int)(($detailsMap[$id]['statistics']['viewCount'] ?? 0));
+                $likes = (int)(($detailsMap[$id]['statistics']['likeCount'] ?? 0));
+                $itShort = [
+                    'id' => $id,
+                    'url' => 'https://www.youtube.com/watch?v=' . $id,
+                    'title' => $title,
+                    'channel' => ['title' => $chanTitle, 'id' => $chanId],
+                    'metrics' => ['views' => $views, 'likes' => $likes],
+                    'published' => ['iso' => $pubIso, 'display' => $display],
+                    'description' => $desc,
+                    'tags' => $tags,
+                ];
+                $itFull = $itShort;
+                $itFull['raw'] = [
+                    'listItem' => $item,
+                    'details' => $detailsMap[$id] ?? null,
+                ];
+                $shortItems[] = $itShort;
+                $fullItems[] = $itFull;
+            }
+
+            // Short JSON kaydet
+            $shortJsonData = [
+                'query' => [ 'q' => $query, 'sort' => $sort, 'limit' => count($results) ],
+                'meta' => [ 'region' => $regionCode, 'generatedAt' => $nowIso, 'fromCache' => true ],
+                'items' => $shortItems,
+            ];
+            autoSaveJson($query, $sort, 'short', $shortJsonData);
+
+            // Full JSON kaydet
+            $fullJsonData = [
+                'query' => ['q' => $query, 'sort' => $sort, 'limit' => count($results)],
+                'meta' => [ 'region' => $regionCode, 'providerHost' => $rapidHost, 'cache' => ['ttlSeconds' => $cacheTtl], 'generatedAt' => $nowIso, 'fromCache' => true ],
+                'items' => $fullItems,
+                'errors' => [],
+            ];
+            autoSaveJson($query, $sort, 'full', $fullJsonData);
         } else {
             $search = $yt->search($query, $maxResults, $regionCode);
         }
@@ -161,11 +214,87 @@ if ($query !== '') {
                                 'tagsByVideo' => $tagsByVideo,
                             ]);
                         }
+
+                        // Otomatik JSON kaydetme - hem short hem full
+                        $nowIso = date('c');
+                        $shortItems = [];
+                        $fullItems = [];
+                        foreach ($results as $item) {
+                            $id = $item['id']['videoId'] ?? ($item['videoId'] ?? ($item['id'] ?? ($item['video']['videoId'] ?? null)));
+                            if (!$id) continue;
+                            $sn = $item['snippet'] ?? [];
+                            $title = $sn ? ($sn['title'] ?? '') : ($item['title'] ?? '');
+                            $chanTitle = $sn ? ($sn['channelTitle'] ?? '') : ($item['channelTitle'] ?? ($item['channel']['title'] ?? ''));
+                            $chanId = $sn['channelId'] ?? ($item['channelId'] ?? ($item['channel']['channelId'] ?? null));
+                            $detail = $detailsMap[$id] ?? [];
+                            $desc = $detail['description'] ?? ($detail['video']['description'] ?? ($sn['description'] ?? ($item['description'] ?? null)));
+                            $tags = $tagsByVideo[$id] ?? [];
+                            $pubIso = $detail['publishDate'] ?? ($detail['uploadDate'] ?? ($sn['publishedAt'] ?? null));
+                            $display = $item['publishedTimeText'] ?? ($item['publishedText'] ?? ($sn['publishedAt'] ?? null));
+                            $views = (int)(($detailsMap[$id]['statistics']['viewCount'] ?? 0));
+                            $likes = (int)(($detailsMap[$id]['statistics']['likeCount'] ?? 0));
+                            $itShort = [
+                                'id' => $id,
+                                'url' => 'https://www.youtube.com/watch?v=' . $id,
+                                'title' => $title,
+                                'channel' => ['title' => $chanTitle, 'id' => $chanId],
+                                'metrics' => ['views' => $views, 'likes' => $likes],
+                                'published' => ['iso' => $pubIso, 'display' => $display],
+                                'description' => $desc,
+                                'tags' => $tags,
+                            ];
+                            $itFull = $itShort;
+                            $itFull['raw'] = [
+                                'listItem' => $item,
+                                'details' => $detailsMap[$id] ?? null,
+                            ];
+                            $shortItems[] = $itShort;
+                            $fullItems[] = $itFull;
+                        }
+
+                        // Short JSON kaydet
+                        $shortJsonData = [
+                            'query' => [ 'q' => $query, 'sort' => $sort, 'limit' => count($results) ],
+                            'meta' => [ 'region' => $regionCode, 'generatedAt' => $nowIso ],
+                            'items' => $shortItems,
+                        ];
+                        autoSaveJson($query, $sort, 'short', $shortJsonData);
+
+                        // Full JSON kaydet
+                        $fullJsonData = [
+                            'query' => ['q' => $query, 'sort' => $sort, 'limit' => count($results)],
+                            'meta' => [ 'region' => $regionCode, 'providerHost' => $rapidHost, 'cache' => ['ttlSeconds' => $cacheTtl], 'generatedAt' => $nowIso ],
+                            'items' => $fullItems,
+                            'errors' => $error ? [$error] : [],
+                        ];
+                        autoSaveJson($query, $sort, 'full', $fullJsonData);
                     }
                 }
             }
         }
     }
+}
+
+// Otomatik JSON kaydetme fonksiyonu
+function autoSaveJson(string $query, string $sort, string $variant, array $data): void {
+    $baseDir = __DIR__ . '/output';
+    $qSlug = slugify($query);
+    $dir = $baseDir . '/search_' . $qSlug . '/' . $variant;
+    @mkdir($dir, 0777, true);
+    $ts = date('Ymd_His');
+    $file = sprintf('search_%s_%s_%s.json', $qSlug, $sort, $ts);
+    $path = $dir . '/' . $file;
+    $pretty = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    @file_put_contents($path, $pretty);
+}
+
+function slugify(string $s): string {
+    $s = trim($s);
+    $s = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $s);
+    $s = strtolower($s);
+    $s = preg_replace('~[^a-z0-9]+~', '-', $s) ?: '';
+    $s = trim($s, '-');
+    return $s ?: 'untitled';
 }
 
 ?><!doctype html>
@@ -185,8 +314,6 @@ if ($query !== '') {
             <?php if ($query !== '' && !$error): ?>
                 <h2 class="text-lg font-medium text-gray-700">Sonuçlar: "<?= e($query) ?>"</h2>
                 <div class="flex gap-2">
-                    <button class="px-3 py-1 rounded-md border border-gray-300 bg-gray-100 text-gray-800 hover:bg-gray-200" type="button" onclick="exportSearch('short')">Kısa JSON Kaydet</button>
-                    <button class="px-3 py-1 rounded-md border border-gray-300 bg-gray-100 text-gray-800 hover:bg-gray-200" type="button" onclick="exportSearch('full')">Uzun JSON Kaydet</button>
                     <button class="px-3 py-1 rounded-md border border-indigo-300 bg-indigo-600 text-white hover:bg-indigo-500" type="button" onclick="analyzeSearchNow()">📊 Analiz Et</button>
                 </div>
             <?php else: ?>
@@ -301,75 +428,6 @@ if ($query !== '') {
                 </details>
             </div>
         <?php endif; ?>
-        <?php if ($query !== '' && !$error): ?>
-            <?php
-            // Kısa/Uzun JSON (arama)
-            $nowIso = date('c');
-            $shortItems = [];
-            $fullItems = [];
-            foreach ($results as $item) {
-                $id = $item['id']['videoId'] ?? ($item['videoId'] ?? ($item['id'] ?? ($item['video']['videoId'] ?? null)));
-                if (!$id) continue;
-                $sn = $item['snippet'] ?? [];
-                $title = $sn ? ($sn['title'] ?? '') : ($item['title'] ?? '');
-                $chanTitle = $sn ? ($sn['channelTitle'] ?? '') : ($item['channelTitle'] ?? ($item['channel']['title'] ?? ''));
-                $chanId = $sn['channelId'] ?? ($item['channelId'] ?? ($item['channel']['channelId'] ?? null));
-                $detail = $detailsMap[$id] ?? [];
-                $desc = $detail['description'] ?? ($detail['video']['description'] ?? ($sn['description'] ?? ($item['description'] ?? null)));
-                $tags = $tagsByVideo[$id] ?? [];
-                $pubIso = $detail['publishDate'] ?? ($detail['uploadDate'] ?? ($sn['publishedAt'] ?? null));
-                $display = $item['publishedTimeText'] ?? ($item['publishedText'] ?? ($sn['publishedAt'] ?? null));
-                $views = (int)(($detailsMap[$id]['statistics']['viewCount'] ?? 0));
-                $likes = (int)(($detailsMap[$id]['statistics']['likeCount'] ?? 0));
-                $itShort = [
-                    'id' => $id,
-                    'url' => 'https://www.youtube.com/watch?v=' . $id,
-                    'title' => $title,
-                    'channel' => ['title' => $chanTitle, 'id' => $chanId],
-                    'metrics' => ['views' => $views, 'likes' => $likes],
-                    'published' => ['iso' => $pubIso, 'display' => $display],
-                    'description' => $desc,
-                    'tags' => $tags,
-                ];
-                $itFull = $itShort;
-                $itFull['raw'] = [
-                    'listItem' => $item,
-                    'details' => $detailsMap[$id] ?? null,
-                ];
-                $shortItems[] = $itShort;
-                $fullItems[] = $itFull;
-            }
-            $shortJsonS = [
-                'query' => [ 'q' => $query, 'sort' => $sort, 'limit' => count($results) ],
-                'meta' => [ 'region' => $regionCode, 'generatedAt' => $nowIso ],
-                'items' => $shortItems,
-            ];
-            $fullJsonS = [
-                'query' => $shortJsonS['query'],
-                'meta' => [ 'region' => $regionCode, 'providerHost' => $rapidHost, 'cache' => ['ttlSeconds' => $cacheTtl], 'generatedAt' => $nowIso ],
-                'items' => $fullItems,
-                'errors' => $error ? [$error] : [],
-            ];
-            ?>
-            <div class="mt-6">
-                <details class="bg-white border border-gray-200 rounded-xl p-3">
-                    <summary class="cursor-pointer select-none font-medium">Kısa JSON (Arama)</summary>
-                    <div class="mt-2">
-                        <pre style="white-space:pre-wrap;word-break:break-word;" id="shortJsonSearch"><?= e(json_encode($shortJsonS, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)) ?></pre>
-                        <button class="mt-2 px-3 py-2 rounded-md border border-gray-300 bg-gray-100 text-gray-800 hover:bg-gray-200" type="button" onclick="exportSearch('short')">Kısa JSON'u Kaydet</button>
-                    </div>
-                </details>
-            </div>
-            <div class="mt-4">
-                <details class="bg-white border border-gray-200 rounded-xl p-3">
-                    <summary class="cursor-pointer select-none font-medium">Uzun JSON (Arama)</summary>
-                    <div class="mt-2">
-                        <pre style="white-space:pre-wrap;word-break:break-word;" id="fullJsonSearch"><?= e(json_encode($fullJsonS, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)) ?></pre>
-                        <button class="mt-2 px-3 py-2 rounded-md border border-gray-300 bg-gray-100 text-gray-800 hover:bg-gray-200" type="button" onclick="exportSearch('full')">Uzun JSON'u Kaydet</button>
-                    </div>
-                </details>
-            </div>
-        <?php endif; ?>
     </div>
     <script>
     (function(){
@@ -427,38 +485,16 @@ if ($query !== '') {
             // Sayfa ilk yüklendiğinde seçili moda göre uygula
             if (sortSelect.value !== 'relevance') sortCards(sortSelect.value);
         }
-        window.exportSearch = async function(variant){
-            try {
-                const pre = document.getElementById(variant==='short' ? 'shortJsonSearch' : 'fullJsonSearch');
-                const json = pre ? pre.textContent : '';
-                const form = new FormData();
-                form.append('mode', 'search');
-                form.append('variant', variant);
-                form.append('json', json);
-                form.append('q', <?= json_encode($query) ?>);
-                form.append('sort', <?= json_encode($sort) ?>);
-                const res = await fetch('export.php', { method:'POST', body: form });
-                const data = await res.json();
-                if (!data.ok) throw new Error(data.error||'Export failed');
-                alert('Kaydedildi: ' + data.path);
-            } catch (e) { alert('Hata: ' + e.message); }
-        }
         window.analyzeSearchNow = function(){
-            try {
-                const pre = document.getElementById('shortJsonSearch');
-                const json = pre ? pre.textContent : '';
-                const form = document.createElement('form');
-                form.method = 'POST';
-                form.action = 'analyze.php';
-                const add = (k,v)=>{ const i=document.createElement('input'); i.type='hidden'; i.name=k; i.value=v; form.appendChild(i); };
-                add('mode','search');
-                add('variant','short');
-                add('payload', json);
-                add('q', <?= json_encode($query) ?>);
-                add('back', window.location.href);
-                document.body.appendChild(form);
-                form.submit();
-            } catch(e) { alert('Hata: '+e.message); }
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = 'analyze.php';
+            const add = (k,v)=>{ const i=document.createElement('input'); i.type='hidden'; i.name=k; i.value=v; form.appendChild(i); };
+            add('mode','search');
+            add('q', <?= json_encode($query) ?>);
+            add('back', window.location.href);
+            document.body.appendChild(form);
+            form.submit();
         }
     })();
     </script>

@@ -180,24 +180,55 @@ if ($typeFilter === 'analysis') {
 
                             <!-- Kaydedilmiş JSON varsa Analize Geç -->
                             <?php
-                            // Check for saved JSON file
+                            // Check for saved JSON file (short variant için)
                             $outputDir = __DIR__ . '/output';
                             $jsonFile = null;
                             if ($kind === 'channel' && !empty($meta['channelId'])) {
-                                $channelDir = $outputDir . '/channel_' . $meta['channelId'];
-                                if (is_dir($channelDir)) {
-                                    $files = glob($channelDir . '/*.json');
-                                    if (!empty($files)) {
-                                        $jsonFile = $files[0]; // Get first JSON file
+                                // Kanal için: channel_[name]_[id]/short/ klasörünü kontrol et
+                                $channelId = $meta['channelId'];
+                                // Önce kanal adıyla klasör ara
+                                $channelDirs = glob($outputDir . '/channel_*_' . $channelId);
+                                if (empty($channelDirs)) {
+                                    // Eski format: sadece ID ile
+                                    $channelDirs = glob($outputDir . '/channel_' . $channelId);
+                                }
+                                if (!empty($channelDirs)) {
+                                    $channelDir = $channelDirs[0];
+                                    // Önce short klasörüne bak
+                                    $shortDir = $channelDir . '/short';
+                                    if (is_dir($shortDir)) {
+                                        $files = glob($shortDir . '/*.json');
+                                        if (!empty($files)) {
+                                            $jsonFile = $files[0];
+                                        }
+                                    }
+                                    // Short yoksa ana klasöre bak (eski format)
+                                    if (!$jsonFile && is_dir($channelDir)) {
+                                        $files = glob($channelDir . '/*.json');
+                                        if (!empty($files)) {
+                                            $jsonFile = $files[0];
+                                        }
                                     }
                                 }
                             } else {
+                                // Arama için: search_[slug]/short/ klasörünü kontrol et
                                 $searchSlug = slugify($r['query']);
                                 $searchDir = $outputDir . '/search_' . $searchSlug;
                                 if (is_dir($searchDir)) {
-                                    $files = glob($searchDir . '/*.json');
-                                    if (!empty($files)) {
-                                        $jsonFile = $files[0];
+                                    // Önce short klasörüne bak
+                                    $shortDir = $searchDir . '/short';
+                                    if (is_dir($shortDir)) {
+                                        $files = glob($shortDir . '/*.json');
+                                        if (!empty($files)) {
+                                            $jsonFile = $files[0];
+                                        }
+                                    }
+                                    // Short yoksa ana klasöre bak (eski format)
+                                    if (!$jsonFile) {
+                                        $files = glob($searchDir . '/*.json');
+                                        if (!empty($files)) {
+                                            $jsonFile = $files[0];
+                                        }
                                     }
                                 }
                             }

@@ -46,6 +46,7 @@ $cacheTtl = 43200; // 12 saat
 
 $error = '';
 $channelId = null;
+$channelName = '';
 $items = [];
 $detailsMap = [];
 $tagsByVideo = [];
@@ -173,9 +174,112 @@ if ($url !== '') {
                     'limit' => $limit,
                     'count' => count($items),
                 ]);
+
+                // Kanal adını ilk videodan al
+                if (!empty($items)) {
+                    $firstItem = $items[0];
+                    $channelName = $firstItem['channelTitle'] ?? ($firstItem['channel']['title'] ?? '');
+                }
+
+                // Otomatik JSON kaydetme - hem short hem full
+                $nowIso = date('c');
+                $shortItems = [];
+                $fullItems = [];
+                foreach ($items as $it) {
+                    $vid = get_video_id((array)$it) ?? '';
+                    $title = $it['title'] ?? '';
+                    $chanTitle = $it['channelTitle'] ?? ($it['channel']['title'] ?? '');
+                    $chanId = $it['channelId'] ?? ($it['channel']['channelId'] ?? $channelId);
+                    $views = parse_intish($it['stats']['views'] ?? ($it['viewCount'] ?? ($it['viewCountText'] ?? 0)));
+                    $likes = parse_intish($it['stats']['likes'] ?? ($it['likeCount'] ?? 0));
+                    $detail = $detailsMap[$vid] ?? [];
+                    $desc = $detail['description'] ?? ($detail['video']['description'] ?? null);
+                    $tags = $tagsByVideo[$vid] ?? [];
+                    $pubIso = $detail['publishDate'] ?? ($detail['uploadDate'] ?? null);
+                    $display = $it['publishedTimeText'] ?? ($it['publishedText'] ?? ($it['published'] ?? null));
+                    $itemShort = [
+                        'id' => $vid,
+                        'url' => 'https://www.youtube.com/watch?v=' . $vid,
+                        'title' => $title,
+                        'channel' => ['title' => $chanTitle, 'id' => $chanId],
+                        'metrics' => ['views' => $views, 'likes' => $likes],
+                        'published' => ['iso' => $pubIso, 'display' => $display],
+                        'type' => $kind === 'shorts' ? 'shorts' : 'video',
+                        'description' => $desc,
+                        'tags' => $tags,
+                    ];
+                    $itemFull = $itemShort;
+                    // Thumbnail'ları ekle
+                    $thumbs = [];
+                    if (!empty($it['thumbnail']) && is_array($it['thumbnail'])) {
+                        foreach ($it['thumbnail'] as $th) {
+                            if (is_array($th) && !empty($th['url'])) $thumbs[] = $th;
+                        }
+                    } elseif (!empty($it['thumbnails']) && is_array($it['thumbnails'])) {
+                        foreach ($it['thumbnails'] as $th) {
+                            if (is_array($th) && !empty($th['url'])) $thumbs[] = $th;
+                        }
+                    }
+                    if ($thumbs) $itemFull['thumbnails'] = $thumbs;
+                    $itemFull['raw'] = ['listItem' => $it, 'details' => $detail ?: null];
+                    $shortItems[] = $itemShort;
+                    $fullItems[] = $itemFull;
+                }
+
+                // Short JSON kaydet
+                $shortJsonData = [
+                    'query' => [
+                        'inputUrl' => $url,
+                        'channelId' => $channelId,
+                        'channelName' => $channelName,
+                        'kind' => $kind,
+                        'sort' => $sort,
+                        'limit' => $limit,
+                    ],
+                    'meta' => [ 'region' => $regionCode, 'generatedAt' => $nowIso ],
+                    'items' => $shortItems,
+                ];
+                autoSaveChannelJson($channelId, $channelName, $kind, $sort, 'short', $shortJsonData);
+
+                // Full JSON kaydet
+                $fullJsonData = [
+                    'query' => $shortJsonData['query'],
+                    'meta' => [
+                        'region' => $regionCode,
+                        'providerHost' => $rapidHost,
+                        'cache' => ['ttlSeconds' => $cacheTtl],
+                        'generatedAt' => $nowIso,
+                        'stats' => $stats,
+                    ],
+                    'items' => $fullItems,
+                ];
+                autoSaveChannelJson($channelId, $channelName, $kind, $sort, 'full', $fullJsonData);
             }
         }
     }
+}
+
+// Otomatik JSON kaydetme fonksiyonu (kanal için)
+function autoSaveChannelJson(string $channelId, string $channelName, string $kind, string $sort, string $variant, array $data): void {
+    $baseDir = __DIR__ . '/output';
+    $channelSlug = $channelName ? slugify($channelName) : '';
+    $folderName = $channelSlug ? 'channel_' . $channelSlug . '_' . $channelId : 'channel_' . preg_replace('~[^A-Za-z0-9_-]+~', '', $channelId);
+    $dir = $baseDir . '/' . $folderName . '/' . $variant;
+    @mkdir($dir, 0777, true);
+    $ts = date('Ymd_His');
+    $file = sprintf('channel_%s_%s_%s_%s.json', $channelId, $kind, $sort, $ts);
+    $path = $dir . '/' . $file;
+    $pretty = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    @file_put_contents($path, $pretty);
+}
+
+function slugify(string $s): string {
+    $s = trim($s);
+    $s = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $s);
+    $s = strtolower($s);
+    $s = preg_replace('~[^a-z0-9]+~', '-', $s) ?: '';
+    $s = trim($s, '-');
+    return $s ?: 'untitled';
 }
 
 ?><!doctype html>
@@ -195,8 +299,6 @@ if ($url !== '') {
         <?php if ($url !== '' && !$error): ?>
             <h2 class="text-lg font-medium text-gray-700">Kanal: <?= e($url) ?></h2>
             <div class="flex gap-2">
-                <button class="px-3 py-1 rounded-md border border-gray-300 bg-gray-100 text-gray-800 hover:bg-gray-200" type="button" onclick="exportJson('channel','short')">Kısa JSON Kaydet</button>
-                <button class="px-3 py-1 rounded-md border border-gray-300 bg-gray-100 text-gray-800 hover:bg-gray-200" type="button" onclick="exportJson('channel','full')">Uzun JSON Kaydet</button>
                 <button class="px-3 py-1 rounded-md border border-indigo-300 bg-indigo-600 text-white hover:bg-indigo-500" type="button" onclick="analyzeJson('channel')">📊 Analiz Et</button>
             </div>
         <?php else: ?>
@@ -378,24 +480,6 @@ if ($url !== '') {
             'errors' => $error ? [$error] : [],
         ];
         ?>
-        <div class="mt-6">
-            <details class="bg-white border border-gray-200 rounded-xl p-3">
-                <summary class="cursor-pointer select-none font-medium">Kısa JSON</summary>
-                <div class="mt-2">
-                    <pre style="white-space:pre-wrap;word-break:break-word;" id="shortJsonChannel"><?= e(json_encode($shortJson, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)) ?></pre>
-                    <button class="mt-2 px-3 py-2 rounded-md border border-gray-300 bg-gray-100 text-gray-800 hover:bg-gray-200" type="button" onclick="exportJson('channel','short')">Kısa JSON'u Kaydet</button>
-                </div>
-            </details>
-        </div>
-        <div class="mt-4">
-            <details class="bg-white border border-gray-200 rounded-xl p-3">
-                <summary class="cursor-pointer select-none font-medium">Uzun JSON</summary>
-                <div class="mt-2">
-                    <pre style="white-space:pre-wrap;word-break:break-word;" id="fullJsonChannel"><?= e(json_encode($fullJson, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)) ?></pre>
-                    <button class="mt-2 px-3 py-2 rounded-md border border-gray-300 bg-gray-100 text-gray-800 hover:bg-gray-200" type="button" onclick="exportJson('channel','full')">Uzun JSON'u Kaydet</button>
-                </div>
-            </details>
-        </div>
     <?php endif; ?>
 </div>
 
@@ -448,41 +532,16 @@ if ($url !== '') {
             sortCards(sortSelect.value);
         }
     }
-    window.exportJson = async function(mode, variant){
-        try {
-            const pre = document.getElementById(variant==='short' ? 'shortJsonChannel' : 'fullJsonChannel');
-            const json = pre ? pre.textContent : '';
-            const form = new FormData();
-            form.append('mode', 'channel');
-            form.append('variant', variant);
-            form.append('json', json);
-            form.append('channelId', <?= json_encode($channelId) ?>);
-            form.append('kind', <?= json_encode($kind) ?>);
-            form.append('sort', <?= json_encode($sort) ?>);
-            const res = await fetch('export.php', { method:'POST', body: form });
-            const data = await res.json();
-            if (!data.ok) throw new Error(data.error||'Export failed');
-            alert('Kaydedildi: ' + data.path);
-        } catch (e) {
-            alert('Hata: ' + e.message);
-        }
-    }
     window.analyzeJson = function(mode){
-        try {
-            const pre = document.getElementById('shortJsonChannel');
-            const json = pre ? pre.textContent : '';
-            const form = document.createElement('form');
-            form.method = 'POST';
-            form.action = 'analyze.php';
-            const add = (k,v)=>{ const i=document.createElement('input'); i.type='hidden'; i.name=k; i.value=v; form.appendChild(i); };
-            add('mode','channel');
-            add('variant','short');
-            add('payload', json);
-            add('channelId', <?= json_encode($channelId) ?>);
-            add('back', window.location.href);
-            document.body.appendChild(form);
-            form.submit();
-        } catch(e) { alert('Hata: '+e.message); }
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = 'analyze.php';
+        const add = (k,v)=>{ const i=document.createElement('input'); i.type='hidden'; i.name=k; i.value=v; form.appendChild(i); };
+        add('mode','channel');
+        add('channelId', <?= json_encode($channelId) ?>);
+        add('back', window.location.href);
+        document.body.appendChild(form);
+        form.submit();
     }
 })();
 </script>

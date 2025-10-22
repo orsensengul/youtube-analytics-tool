@@ -25,6 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 $mode = $_POST['mode'] ?? '';
 $variant = $_POST['variant'] ?? 'short'; // short|full
 $json = $_POST['json'] ?? '';
+$autoSave = isset($_POST['auto_save']) && $_POST['auto_save'] === '1';
 
 if (!$mode || !$json) {
     respond(false, ['error' => 'Missing fields']);
@@ -43,23 +44,32 @@ $ts = date('Ymd_His');
 
 if ($mode === 'channel') {
     $channelId = (string)($_POST['channelId'] ?? '');
+    $channelName = (string)($_POST['channelName'] ?? '');
     $kind = (string)($_POST['kind'] ?? 'videos');
     $sort = (string)($_POST['sort'] ?? 'views');
     if ($channelId === '') respond(false, ['error' => 'channelId required']);
-    $slug = 'channel_' . preg_replace('~[^A-Za-z0-9_-]+~', '', $channelId);
-    $dir = $baseDir . '/' . $slug;
+
+    // Kanal adını slug'a çevir
+    $channelSlug = $channelName ? slugify($channelName) : '';
+    $folderName = $channelSlug ? 'channel_' . $channelSlug . '_' . $channelId : 'channel_' . preg_replace('~[^A-Za-z0-9_-]+~', '', $channelId);
+
+    // Variant'a göre alt klasör oluştur
+    $dir = $baseDir . '/' . $folderName . '/' . $variant;
     @mkdir($dir, 0777, true);
-    $file = sprintf('channel_%s_%s_%s_%s_%s.json', $channelId, $kind, $sort, $ts, $variant);
+
+    $file = sprintf('channel_%s_%s_%s_%s.json', $channelId, $kind, $sort, $ts);
     $path = $dir . '/' . $file;
 } elseif ($mode === 'search') {
     $q = (string)($_POST['q'] ?? '');
     $sort = (string)($_POST['sort'] ?? 'relevance');
     if ($q === '') respond(false, ['error' => 'q required']);
     $qSlug = slugify($q);
-    $slug = 'search_' . $qSlug;
-    $dir = $baseDir . '/' . $slug;
+
+    // Variant'a göre alt klasör oluştur
+    $dir = $baseDir . '/search_' . $qSlug . '/' . $variant;
     @mkdir($dir, 0777, true);
-    $file = sprintf('search_%s_%s_%s_%s.json', $qSlug, $sort, $ts, $variant);
+
+    $file = sprintf('search_%s_%s_%s.json', $qSlug, $sort, $ts);
     $path = $dir . '/' . $file;
 } else {
     respond(false, ['error' => 'Unknown mode']);
@@ -71,6 +81,7 @@ if (@file_put_contents($path, $pretty) === false) {
 }
 
 respond(true, [
-    'path' => 'ymt/output/' . basename(dirname($path)) . '/' . basename($path),
+    'path' => 'ymt/output/' . basename(dirname(dirname($path))) . '/' . $variant . '/' . basename($path),
+    'variant' => $variant,
 ]);
 
