@@ -61,8 +61,9 @@ class UserManager
         return Database::select($sql, $params);
     }
 
-    public static function getUserById(int $userId): ?array
+    public static function getUserById($userId): ?array
     {
+        $userId = (int)$userId; // Ensure integer
         $user = Database::selectOne("SELECT * FROM users WHERE id = ?", [$userId]);
         return $user ?: null;
     }
@@ -150,8 +151,9 @@ class UserManager
         }
     }
 
-    public static function deleteUser(int $userId): bool
+    public static function deleteUser($userId): bool
     {
+        $userId = (int)$userId; // Ensure integer
         try {
             Database::delete('users', 'id = ?', [$userId]);
             return true;
@@ -162,8 +164,9 @@ class UserManager
 
     // ==================== DATA QUERY LIMITS ====================
 
-    public static function checkDataQueryLimit(int $userId): bool
+    public static function checkDataQueryLimit($userId): bool
     {
+        $userId = (int)$userId; // Ensure integer
         $user = self::getUserById($userId);
         if (!$user) return false;
 
@@ -187,8 +190,9 @@ class UserManager
         return true;
     }
 
-    public static function incrementDataQueryCount(int $userId): void
+    public static function incrementDataQueryCount($userId): void
     {
+        $userId = (int)$userId; // Ensure integer
         $user = self::getUserById($userId);
         if (!$user) return;
 
@@ -204,8 +208,9 @@ class UserManager
         );
     }
 
-    public static function resetDataQueryCountIfNeeded(int $userId): void
+    public static function resetDataQueryCountIfNeeded($userId): void
     {
+        $userId = (int)$userId; // Ensure integer
         $user = self::getUserById($userId);
         if (!$user) return;
 
@@ -230,8 +235,9 @@ class UserManager
         }
     }
 
-    public static function getRemainingDataQueries(int $userId): array
+    public static function getRemainingDataQueries($userId): array
     {
+        $userId = (int)$userId; // Ensure integer
         $user = self::getUserById($userId);
         if (!$user) return ['daily' => 0, 'monthly' => 0];
 
@@ -250,8 +256,9 @@ class UserManager
 
     // ==================== ANALYSIS QUERY LIMITS ====================
 
-    public static function checkAnalysisQueryLimit(int $userId): bool
+    public static function checkAnalysisQueryLimit($userId): bool
     {
+        $userId = (int)$userId; // Ensure integer
         $user = self::getUserById($userId);
         if (!$user) return false;
 
@@ -275,8 +282,9 @@ class UserManager
         return true;
     }
 
-    public static function incrementAnalysisQueryCount(int $userId): void
+    public static function incrementAnalysisQueryCount($userId): void
     {
+        $userId = (int)$userId; // Ensure integer
         $user = self::getUserById($userId);
         if (!$user) return;
 
@@ -292,8 +300,9 @@ class UserManager
         );
     }
 
-    public static function resetAnalysisQueryCountIfNeeded(int $userId): void
+    public static function resetAnalysisQueryCountIfNeeded($userId): void
     {
+        $userId = (int)$userId; // Ensure integer
         $user = self::getUserById($userId);
         if (!$user) return;
 
@@ -318,8 +327,9 @@ class UserManager
         }
     }
 
-    public static function getRemainingAnalysisQueries(int $userId): array
+    public static function getRemainingAnalysisQueries($userId): array
     {
+        $userId = (int)$userId; // Ensure integer
         $user = self::getUserById($userId);
         if (!$user) return ['daily' => 0, 'monthly' => 0];
 
@@ -338,8 +348,9 @@ class UserManager
 
     // ==================== LICENSE & ACTIVITY ====================
 
-    public static function isLicenseValid(int $userId): bool
+    public static function isLicenseValid($userId): bool
     {
+        $userId = (int)$userId; // Ensure integer
         $user = self::getUserById($userId);
         if (!$user) return false;
 
@@ -350,8 +361,9 @@ class UserManager
         return strtotime($user['license_expires_at']) > time();
     }
 
-    public static function getLicenseInfo(int $userId): array
+    public static function getLicenseInfo($userId): array
     {
+        $userId = (int)$userId; // Ensure integer
         $user = self::getUserById($userId);
         if (!$user) {
             return ['status' => 'unknown', 'days_remaining' => 0];
@@ -431,8 +443,9 @@ class UserManager
         return Database::select($sql, $params);
     }
 
-    public static function getUserStats(int $userId): array
+    public static function getUserStats($userId): array
     {
+        $userId = (int)$userId; // Ensure integer
         $user = self::getUserById($userId);
         if (!$user) return [];
 
