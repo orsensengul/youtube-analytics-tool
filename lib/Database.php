@@ -71,7 +71,7 @@ class Database
         $pdo = self::getInstance();
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
-        return $stmt->fetchAll();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     /**
@@ -82,7 +82,7 @@ class Database
         $pdo = self::getInstance();
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
-        $result = $stmt->fetch();
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
         return $result ?: null;
     }
 
