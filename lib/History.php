@@ -42,31 +42,28 @@ class History
      */
     public function getHistory(string $type = 'all', int $limit = 100): array
     {
-        $sql = "SELECT * FROM search_history WHERE 1=1";
-        $params = [];
-
-        if ($this->userId !== null) {
-            $sql .= " AND (user_id = :user_id OR user_id IS NULL)";
-            $params[':user_id'] = $this->userId;
-        }
+        $sql = "SELECT * FROM search_history WHERE user_id = ?";
+        $params = [$this->userId];
 
         if ($type !== 'all') {
-            $sql .= " AND search_type = :type";
-            $params[':type'] = $type;
+            $sql .= " AND search_type = ?";
+            $params[] = $type;
         }
 
-        $sql .= " ORDER BY created_at DESC LIMIT :limit";
-        $params[':limit'] = $limit;
+        $sql .= " ORDER BY created_at DESC LIMIT ?";
+        $params[] = $limit;
 
         try {
             $pdo = Database::getInstance();
             $stmt = $pdo->prepare($sql);
 
-            foreach ($params as $key => $value) {
-                if ($key === ':limit') {
-                    $stmt->bindValue($key, $value, PDO::PARAM_INT);
+            // Bind all parameters as positional
+            foreach ($params as $i => $value) {
+                if ($i === count($params) - 1) {
+                    // Last parameter is LIMIT, bind as INT
+                    $stmt->bindValue($i + 1, $value, PDO::PARAM_INT);
                 } else {
-                    $stmt->bindValue($key, $value);
+                    $stmt->bindValue($i + 1, $value);
                 }
             }
 
@@ -84,7 +81,7 @@ class History
     public function delete(int $id): bool
     {
         try {
-            Database::delete('search_history', 'id = :id', [':id' => $id]);
+            Database::delete('search_history', 'id = ? AND user_id = ?', [$id, $this->userId]);
             return true;
         } catch (Exception $e) {
             error_log("History delete error: " . $e->getMessage());
@@ -99,9 +96,7 @@ class History
     {
         try {
             if ($this->userId !== null) {
-                Database::delete('search_history', 'user_id = :user_id', [':user_id' => $this->userId]);
-            } else {
-                Database::delete('search_history', '1=1');
+                Database::delete('search_history', 'user_id = ?', [$this->userId]);
             }
             return true;
         } catch (Exception $e) {

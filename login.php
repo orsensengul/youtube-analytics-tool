@@ -105,22 +105,7 @@ function e(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8')
                 </div>
             </form>
 
-            <div class="mt-6">
-                <div class="relative">
-                    <div class="absolute inset-0 flex items-center">
-                        <div class="w-full border-t border-gray-300"></div>
-                    </div>
-                    <div class="relative flex justify-center text-sm">
-                        <span class="px-2 bg-gray-50 text-gray-500">Demo Hesap</span>
-                    </div>
-                </div>
-
-                <div class="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <p class="text-xs text-blue-800 mb-2">Demo hesap bilgileri:</p>
-                    <p class="text-xs text-blue-700"><strong>Kullanıcı:</strong> admin</p>
-                    <p class="text-xs text-blue-700"><strong>Şifre:</strong> admin123</p>
-                </div>
-            </div>
+            <?php include __DIR__ . '/includes/footer.php'; ?>
         </div>
     </div>
 </body>

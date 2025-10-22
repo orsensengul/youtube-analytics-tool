@@ -121,6 +121,8 @@ function e(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8')
                     </button>
                 </div>
             </form>
+
+            <?php include __DIR__ . '/includes/footer.php'; ?>
         </div>
     </div>
 </body>

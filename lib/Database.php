@@ -119,9 +119,19 @@ class Database
     {
         $pdo = self::getInstance();
         $setParts = [];
+        $allParams = [];
 
-        foreach (array_keys($data) as $col) {
-            $setParts[] = "$col = :set_$col";
+        // Build SET clause with positional parameters
+        $paramIndex = 1;
+        foreach ($data as $col => $value) {
+            $setParts[] = "$col = ?";
+            $allParams[] = $value;
+            $paramIndex++;
+        }
+
+        // Add WHERE parameters
+        foreach ($whereParams as $value) {
+            $allParams[] = $value;
         }
 
         $sql = sprintf(
@@ -132,16 +142,7 @@ class Database
         );
 
         $stmt = $pdo->prepare($sql);
-
-        foreach ($data as $key => $value) {
-            $stmt->bindValue(":set_$key", $value);
-        }
-
-        foreach ($whereParams as $key => $value) {
-            $stmt->bindValue($key, $value);
-        }
-
-        $stmt->execute();
+        $stmt->execute($allParams);
         return $stmt->rowCount();
     }
 

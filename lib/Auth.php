@@ -95,7 +95,7 @@ class Auth
         }
 
         // Update last login
-        Database::update('users', ['last_login' => date('Y-m-d H:i:s')], 'id = :id', [':id' => $user['id']]);
+        Database::update('users', ['last_login' => date('Y-m-d H:i:s')], 'id = ?', [$user['id']]);
 
         // Set session
         $_SESSION['user_id'] = (int)$user['id'];
@@ -197,9 +197,17 @@ class Auth
     }
 
     /**
+     * Check if current user is admin
+     */
+    public static function isAdmin(): bool
+    {
+        return self::check() && isset($_SESSION['role']) && $_SESSION['role'] === 'admin';
+    }
+
+    /**
      * Require admin role
      */
-    public static function requireAdmin(string $redirectTo = 'index.php'): void
+    public static function requireAdmin(string $redirectTo = '../index.php'): void
     {
         self::requireLogin();
         if (!self::hasRole('admin')) {

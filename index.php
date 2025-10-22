@@ -6,6 +6,7 @@ require_once __DIR__ . '/lib/Database.php';
 require_once __DIR__ . '/lib/Auth.php';
 require_once __DIR__ . '/lib/Cache.php';
 require_once __DIR__ . '/lib/History.php';
+require_once __DIR__ . '/lib/UserManager.php';
 require_once __DIR__ . '/services/YoutubeService.php';
 
 // Initialize database and session
@@ -80,7 +81,11 @@ $fromCache = false;
 $history = new History(Auth::userId());
 
 if ($query !== '') {
-    if (!$rapidKey || $rapidKey === 'YOUR_RAPIDAPI_KEY') {
+    // Check data query limit
+    if (!UserManager::checkDataQueryLimit(Auth::userId())) {
+        $remaining = UserManager::getRemainingDataQueries(Auth::userId());
+        $error = 'Günlük veri sorgu limitinize ulaştınız. Kalan: ' . ($remaining['daily'] === -1 ? 'Sınırsız' : $remaining['daily']);
+    } elseif (!$rapidKey || $rapidKey === 'YOUR_RAPIDAPI_KEY') {
         $error = 'Lütfen RapidAPI anahtarını config.php dosyasında ayarlayın.';
     } else {
         $client = new RapidApiClient($rapidKey, $rapidHost);
@@ -206,6 +211,14 @@ if ($query !== '') {
                             'count' => count($results),
                             'ids' => $videoIds,
                         ]);
+
+                        // Increment data query count and log activity
+                        UserManager::incrementDataQueryCount(Auth::userId());
+                        UserManager::logActivity(Auth::userId(), 'query_search', [
+                            'query' => $query,
+                            'results' => count($results)
+                        ]);
+
                         if ($cacheTtl > 0) {
                             $cache->set($cacheKey, [
                                 'search' => $search,
@@ -498,5 +511,7 @@ function slugify(string $s): string {
         }
     })();
     </script>
+
+    <?php include __DIR__ . '/includes/footer.php'; ?>
 </body>
 </html>
