@@ -8,11 +8,14 @@ require_once __DIR__ . '/lib/Cache.php';
 require_once __DIR__ . '/lib/History.php';
 require_once __DIR__ . '/lib/UserManager.php';
 require_once __DIR__ . '/services/YoutubeService.php';
+require_once __DIR__ . '/lib/DbMigrator.php';
+require_once __DIR__ . '/lib/AppState.php';
 
 // Initialize database and session
 Database::init($config['database']);
 Auth::startSession($config['session']);
 Auth::requireLogin();
+DbMigrator::run();
 
 function e(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); }
 function parse_intish($v): int {
@@ -36,6 +39,7 @@ function get_video_id(array $item): ?string {
 
 $rapidKey = $config['rapidapi_key'] ?? '';
 $rapidHost = $config['rapidapi_host'] ?? 'yt-api.p.rapidapi.com';
+$offline = AppState::isOffline($config);
 $regionCode = $config['region_code'] ?? 'TR';
 
 $url = isset($_GET['url']) ? trim((string)$_GET['url']) : '';
@@ -58,6 +62,8 @@ $stats = [
     'totalFetched' => 0,
     'filteredOut' => ['live' => 0, 'upcoming' => 0],
 ];
+$apiUsed = false;
+$sourceLabel = '';
 
 if ($url !== '') {
     // Check data query limit
@@ -77,10 +83,16 @@ if ($url !== '') {
         if (is_array($resolved) && !empty($resolved['channelId'])) {
             $channelId = (string)$resolved['channelId'];
             $stats['resolveCached'] = true;
+            $sourceLabel = 'Cache';
         }
         if (!$channelId) {
-            $channelId = $yt->resolveChannelId($url, $regionCode);
-            if ($channelId) $cache->set($cacheKeyResolve, ['channelId' => $channelId]);
+            if (!$offline) {
+                $channelId = $yt->resolveChannelId($url, $regionCode);
+                if ($channelId) {
+                    $cache->set($cacheKeyResolve, ['channelId' => $channelId]);
+                    $apiUsed = true;
+                }
+            }
         }
         if (!$channelId) {
             $error = 'Kanal ID çözümlenemedi. Lütfen geçerli bir kanal bağlantısı girin.';
@@ -89,10 +101,30 @@ if ($url !== '') {
             $cacheKeyList = 'channel:list:' . $channelId . ':kind=' . $kind;
             $listResp = $cache->get($cacheKeyList, $cacheTtl);
             if (!$listResp) {
-                $listResp = $yt->channelVideosList($channelId, $kind, $regionCode);
-                $cache->set($cacheKeyList, $listResp);
+                if ($offline) {
+                    $off = load_offline_channel_list($channelId, $kind);
+                    if ($off) {
+                        $listResp = ['items' => $off['items']];
+                        $channelName = $off['channelName'] ?? $channelName;
+                        $sourceLabel = 'Offline';
+                    }
+                } else {
+                    // Online: önce kayıtlı dosyaları dene
+                    $off = load_offline_channel_list($channelId, $kind);
+                    if ($off) {
+                        $listResp = ['items' => $off['items']];
+                        $channelName = $off['channelName'] ?? $channelName;
+                        $sourceLabel = 'Offline';
+                    } else {
+                        $listResp = $yt->channelVideosList($channelId, $kind, $regionCode);
+                        $cache->set($cacheKeyList, $listResp);
+                        $apiUsed = true;
+                        $sourceLabel = 'API';
+                    }
+                }
             } else {
                 $stats['listCached'] = true;
+                if ($sourceLabel==='') $sourceLabel = 'Cache';
             }
             if (!empty($listResp['error'])) {
                 $error = 'Kanal listesi alınamadı: ' . e((string)$listResp['error']);
@@ -181,7 +213,9 @@ if ($url !== '') {
                 ]);
 
                 // Increment data query count and log activity
-                UserManager::incrementDataQueryCount(Auth::userId());
+                if ($apiUsed) {
+                    UserManager::incrementDataQueryCount(Auth::userId());
+                }
                 UserManager::logActivity(Auth::userId(), 'query_channel', [
                     'channel_id' => $channelId,
                     'kind' => $kind,
@@ -273,8 +307,20 @@ if ($url !== '') {
 }
 
 // Otomatik JSON kaydetme fonksiyonu (kanal için)
+function storage_base_dir(): string {
+    $cfg = include __DIR__ . '/config.php';
+    $base = $cfg['storage_dir'] ?? (__DIR__ . '/output');
+    @mkdir($base, 0777, true);
+    if (!is_dir($base) || !is_writable($base)) {
+        $tmp = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'ymt-output';
+        @mkdir($tmp, 0777, true);
+        if (is_dir($tmp) && is_writable($tmp)) return $tmp;
+    }
+    return $base;
+}
+
 function autoSaveChannelJson(string $channelId, string $channelName, string $kind, string $sort, string $variant, array $data): void {
-    $baseDir = __DIR__ . '/output';
+    $baseDir = storage_base_dir();
     $channelSlug = $channelName ? slugify($channelName) : '';
     $folderName = $channelSlug ? 'channel_' . $channelSlug . '_' . $channelId : 'channel_' . preg_replace('~[^A-Za-z0-9_-]+~', '', $channelId);
     $dir = $baseDir . '/' . $folderName . '/' . $variant;
@@ -295,6 +341,40 @@ function slugify(string $s): string {
     return $s ?: 'untitled';
 }
 
+// Load latest saved channel list (full preferred)
+function load_offline_channel_list(string $channelId, string $kind): ?array {
+    $base = storage_base_dir();
+    $patterns = [
+        $base . '/channel_*_' . $channelId . '/full/*.json',
+        $base . '/channel_' . preg_replace('~[^A-Za-z0-9_-]+~', '', $channelId) . '/full/*.json',
+        $base . '/channel_*_' . $channelId . '/short/*.json',
+        $base . '/channel_' . preg_replace('~[^A-Za-z0-9_-]+~', '', $channelId) . '/short/*.json',
+    ];
+    $latest = null; $latestT = 0;
+    foreach ($patterns as $globPat) {
+        foreach (glob($globPat) ?: [] as $f) {
+            $t = @filemtime($f) ?: 0;
+            if ($t > $latestT) { $latest = $f; $latestT = $t; }
+        }
+    }
+    if (!$latest) return null;
+    $raw = @file_get_contents($latest); if ($raw === false) return null;
+    $data = json_decode($raw, true); if (!is_array($data)) return null;
+    $items = $data['items'] ?? [];
+    if (!is_array($items)) $items = [];
+    $channelName = $data['query']['channelName'] ?? null;
+    // If full structure, items contain extended fields; UI expects list-like items; prefer raw.listItem when available
+    $list = [];
+    foreach ($items as $it) {
+        if (isset($it['raw']['listItem']) && is_array($it['raw']['listItem'])) {
+            $list[] = $it['raw']['listItem'];
+        } else {
+            $list[] = $it;
+        }
+    }
+    return ['items' => $list, 'channelName' => $channelName];
+}
+
 ?><!doctype html>
 <html lang="tr">
 <head>
@@ -310,7 +390,15 @@ function slugify(string $s): string {
 
     <div class="flex items-center justify-between mb-3">
         <?php if ($url !== '' && !$error): ?>
-            <h2 class="text-lg font-medium text-gray-700">Kanal: <?= e($url) ?></h2>
+            <h2 class="text-lg font-medium text-gray-700">Kanal: <?= e($url) ?>
+                <?php if (class_exists('Auth') && Auth::isAdmin() && $sourceLabel): ?>
+                    <span class="ml-2 text-xs inline-block px-2 py-0.5 rounded-full border <?php
+                        echo $sourceLabel==='API' ? 'border-green-300 bg-green-50 text-green-700'
+                            : ($sourceLabel==='Cache' ? 'border-blue-300 bg-blue-50 text-blue-700'
+                            : 'border-yellow-300 bg-yellow-50 text-yellow-800');
+                    ?>">Kaynak: <?= e($sourceLabel) ?></span>
+                <?php endif; ?>
+            </h2>
             <div class="flex gap-2">
                 <button class="px-3 py-1 rounded-md border border-indigo-300 bg-indigo-600 text-white hover:bg-indigo-500" type="button" onclick="analyzeJson('channel')">📊 Analiz Et</button>
             </div>

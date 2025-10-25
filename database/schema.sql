@@ -14,6 +14,21 @@ CREATE TABLE IF NOT EXISTS `users` (
   `api_key_rapidapi` VARCHAR(255) NULL COMMENT 'Encrypted RapidAPI key',
   `api_key_ai` VARCHAR(255) NULL COMMENT 'Encrypted AI API key',
   `is_active` BOOLEAN DEFAULT TRUE,
+  -- Limits and counters (defaults safe for registration)
+  `data_query_limit_daily` INT DEFAULT 100,
+  `data_query_limit_monthly` INT DEFAULT 1000,
+  `data_query_count_today` INT DEFAULT 0,
+  `data_query_count_month` INT DEFAULT 0,
+  `query_reset_date` DATE NULL,
+  `query_month_reset` DATE NULL,
+  `analysis_query_limit_daily` INT DEFAULT 50,
+  `analysis_query_limit_monthly` INT DEFAULT 500,
+  `analysis_query_count_today` INT DEFAULT 0,
+  `analysis_query_count_month` INT DEFAULT 0,
+  `analysis_query_reset_date` DATE NULL,
+  `analysis_query_month_reset` DATE NULL,
+  `license_expires_at` TIMESTAMP NULL,
+  `notes` TEXT NULL,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `last_login` TIMESTAMP NULL,
@@ -52,7 +67,7 @@ CREATE TABLE IF NOT EXISTS `api_cache` (
 CREATE TABLE IF NOT EXISTS `search_history` (
   `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   `user_id` INT UNSIGNED NULL COMMENT 'NULL for anonymous',
-  `search_type` ENUM('keyword', 'channel') NOT NULL,
+  `search_type` ENUM('keyword', 'channel', 'video') NOT NULL,
   `query` VARCHAR(500) NOT NULL,
   `metadata` JSON NULL COMMENT 'Additional search parameters',
   `result_count` INT UNSIGNED DEFAULT 0,
@@ -72,7 +87,7 @@ CREATE TABLE IF NOT EXISTS `analysis_results` (
   `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   `user_id` INT UNSIGNED NOT NULL,
   `analysis_type` VARCHAR(50) NOT NULL COMMENT 'descriptions, tags, titles, seo, etc.',
-  `mode` ENUM('search', 'channel') NOT NULL,
+  `mode` ENUM('search', 'channel', 'video') NOT NULL,
   `query` VARCHAR(500) NULL COMMENT 'Search query or channel ID',
   `input_data` MEDIUMTEXT NOT NULL COMMENT 'Input JSON (limited 30 items)',
   `prompt` TEXT NOT NULL COMMENT 'AI prompt used',
@@ -91,6 +106,10 @@ CREATE TABLE IF NOT EXISTS `analysis_results` (
   INDEX idx_is_saved (`is_saved`),
   FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Migration for existing installations: allow 'video' mode
+ALTER TABLE `analysis_results`
+  MODIFY COLUMN `mode` ENUM('search', 'channel', 'video') NOT NULL;
 
 -- ============================================
 -- 5. VIDEO METADATA TABLE
@@ -113,6 +132,7 @@ CREATE TABLE IF NOT EXISTS `video_metadata` (
   `is_live` BOOLEAN DEFAULT FALSE,
   `is_upcoming` BOOLEAN DEFAULT FALSE,
   `raw_data` JSON NULL COMMENT 'Full API response',
+  `local_assets` JSON NULL COMMENT 'Local file paths (e.g., {"thumbnail":"/path"})',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_video_id (`video_id`),
@@ -197,6 +217,66 @@ CREATE TABLE IF NOT EXISTS `system_logs` (
   INDEX idx_created_at (`created_at`),
   FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================
+-- 11. USER ACTIVITY LOG TABLE (used by UserManager::logActivity)
+-- ============================================
+CREATE TABLE IF NOT EXISTS `user_activity_log` (
+  `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `user_id` INT UNSIGNED NOT NULL,
+  `action_type` VARCHAR(50) NOT NULL,
+  `details` JSON NULL,
+  `ip_address` VARCHAR(45) NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_user_id (`user_id`),
+  INDEX idx_action_type (`action_type`),
+  INDEX idx_created_at (`created_at`),
+  FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================
+-- 12. VIDEO TRANSCRIPTS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS `video_transcripts` (
+  `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `video_id` VARCHAR(20) NOT NULL,
+  `lang` VARCHAR(10) NOT NULL,
+  `provider` VARCHAR(50) NULL,
+  `file_json_path` VARCHAR(500) NULL,
+  `file_txt_path` VARCHAR(500) NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_video_lang (`video_id`, `lang`),
+  INDEX idx_video_id (`video_id`),
+  FOREIGN KEY (`video_id`) REFERENCES `video_metadata`(`video_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Migrations (MySQL 8+)
+ALTER TABLE `video_metadata`
+  ADD COLUMN IF NOT EXISTS `local_assets` JSON NULL;
+
+-- ============================================
+-- Safeguard migration for existing installations (MySQL 8+)
+-- ============================================
+ALTER TABLE `users`
+  ADD COLUMN IF NOT EXISTS `data_query_limit_daily` INT DEFAULT 100,
+  ADD COLUMN IF NOT EXISTS `data_query_limit_monthly` INT DEFAULT 1000,
+  ADD COLUMN IF NOT EXISTS `data_query_count_today` INT DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS `data_query_count_month` INT DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS `query_reset_date` DATE NULL,
+  ADD COLUMN IF NOT EXISTS `query_month_reset` DATE NULL,
+  ADD COLUMN IF NOT EXISTS `analysis_query_limit_daily` INT DEFAULT 50,
+  ADD COLUMN IF NOT EXISTS `analysis_query_limit_monthly` INT DEFAULT 500,
+  ADD COLUMN IF NOT EXISTS `analysis_query_count_today` INT DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS `analysis_query_count_month` INT DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS `analysis_query_reset_date` DATE NULL,
+  ADD COLUMN IF NOT EXISTS `analysis_query_month_reset` DATE NULL,
+  ADD COLUMN IF NOT EXISTS `license_expires_at` TIMESTAMP NULL,
+  ADD COLUMN IF NOT EXISTS `notes` TEXT NULL;
+
+-- Allow 'video' type in search_history for existing installs
+ALTER TABLE `search_history`
+  MODIFY COLUMN `search_type` ENUM('keyword', 'channel', 'video') NOT NULL;
 
 -- ============================================
 -- 10. API USAGE STATS TABLE

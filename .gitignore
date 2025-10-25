@@ -10,6 +10,9 @@ storage/history.jsonl
 output/
 !output/.gitkeep
 
+# Local storage (thumbnails, transcripts)
+d_thumbs/
+
 # System files
 .DS_Store
 .DS_Store?

@@ -5,11 +5,13 @@ $config = require __DIR__ . '/config.php';
 require_once __DIR__ . '/lib/Database.php';
 require_once __DIR__ . '/lib/Auth.php';
 require_once __DIR__ . '/lib/History.php';
+require_once __DIR__ . '/lib/DbMigrator.php';
 
 // Initialize database and session
 Database::init($config['database']);
 Auth::startSession($config['session']);
 Auth::requireLogin();
+DbMigrator::run();
 
 function e(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); }
 function slugify(string $s): string {
@@ -77,6 +79,7 @@ if ($typeFilter === 'analysis') {
             <a class="px-3 py-1 rounded-md border border-gray-300 <?= $typeFilter==='all'?'bg-indigo-100 border-indigo-400 text-indigo-900 font-semibold':'bg-gray-100 text-gray-800 hover:bg-gray-200' ?>" href="?type=all">Tümü</a>
             <a class="px-3 py-1 rounded-md border border-gray-300 <?= $typeFilter==='keyword'?'bg-indigo-100 border-indigo-400 text-indigo-900 font-semibold':'bg-gray-100 text-gray-800 hover:bg-gray-200' ?>" href="?type=keyword">Kelime</a>
             <a class="px-3 py-1 rounded-md border border-gray-300 <?= $typeFilter==='channel'?'bg-indigo-100 border-indigo-400 text-indigo-900 font-semibold':'bg-gray-100 text-gray-800 hover:bg-gray-200' ?>" href="?type=channel">Kanal</a>
+            <a class="px-3 py-1 rounded-md border border-gray-300 <?= $typeFilter==='video'?'bg-indigo-100 border-indigo-400 text-indigo-900 font-semibold':'bg-gray-100 text-gray-800 hover:bg-gray-200' ?>" href="?type=video">Tekli Video</a>
             <a class="px-3 py-1 rounded-md border border-gray-300 <?= $typeFilter==='analysis'?'bg-indigo-100 border-indigo-400 text-indigo-900 font-semibold':'bg-gray-100 text-gray-800 hover:bg-gray-200' ?>" href="?type=analysis">Analizler</a>
         </div>
     </div>
@@ -156,6 +159,9 @@ if ($typeFilter === 'analysis') {
                         <?php if ($kind === 'channel'): ?>
                             <?= e($r['query']) ?>
                             <?php if (!empty($meta['channelId'])): ?><div class="text-xs text-gray-500">(<?= e($meta['channelId']) ?>)</div><?php endif; ?>
+                        <?php elseif ($kind === 'video'): ?>
+                            <?= e($r['query']) ?>
+                            <?php if (!empty($meta['title'])): ?><div class="text-xs text-gray-500">(<?= e($meta['title']) ?>)</div><?php endif; ?>
                         <?php else: ?>
                             <?= e($r['query']) ?>
                         <?php endif; ?>
@@ -165,6 +171,9 @@ if ($typeFilter === 'analysis') {
                             <div>Tür: <?= e((string)($meta['kind'] ?? 'videos')) ?></div>
                             <div>Sıralama: <?= e((string)($meta['sort'] ?? 'views')) ?></div>
                             <div>Adet: <?= (int)($meta['count'] ?? 0) ?></div>
+                        <?php elseif ($kind === 'video'): ?>
+                            <div>Adet: 1</div>
+                            <div>Thumb: <?= !empty($meta['has_thumb']) ? '✓' : '—' ?>, Transkript: <?= !empty($meta['has_transcript']) ? '✓' : '—' ?></div>
                         <?php else: ?>
                             <div>Adet: <?= (int)($meta['count'] ?? 0) ?></div>
                             <div>Region: <?= e((string)($meta['region'] ?? '')) ?></div>
@@ -174,6 +183,8 @@ if ($typeFilter === 'analysis') {
                         <div class="flex gap-2">
                             <?php if ($kind === 'channel'): ?>
                                 <a class="px-3 py-1 rounded-md border border-gray-300 bg-gray-100 text-gray-800 hover:bg-gray-200 text-xs" href="channel.php?url=<?= urlencode($r['query']) ?>&kind=<?= e((string)($meta['kind'] ?? 'videos')) ?>&sort=<?= e((string)($meta['sort'] ?? 'views')) ?>&limit=25" title="Kanal sayfasını tekrar aç">🔄 Tekrar Aç</a>
+                            <?php elseif ($kind === 'video'): ?>
+                                <a class="px-3 py-1 rounded-md border border-gray-300 bg-gray-100 text-gray-800 hover:bg-gray-200 text-xs" href="video.php?id=<?= urlencode($r['query']) ?>" title="Videoyu aç">▶️ Videoyu Aç</a>
                             <?php else: ?>
                                 <a class="px-3 py-1 rounded-md border border-gray-300 bg-gray-100 text-gray-800 hover:bg-gray-200 text-xs" href="index.php?q=<?= urlencode($r['query']) ?>" title="Aramayı tekrar yap">🔄 Tekrar Ara</a>
                             <?php endif; ?>
@@ -263,4 +274,3 @@ if ($typeFilter === 'analysis') {
 <?php include __DIR__ . '/includes/footer.php'; ?>
 </body>
 </html>
-

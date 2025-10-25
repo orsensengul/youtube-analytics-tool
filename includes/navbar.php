@@ -24,6 +24,11 @@ function navIsActive(string $page): string {
     global $currentPage;
     return $currentPage === $page ? 'bg-indigo-100 border-indigo-400 text-indigo-900 font-semibold' : 'bg-gray-100 border-gray-300 text-gray-800 hover:bg-gray-200';
 }
+
+function navIsActiveAny(array $pages): string {
+    global $currentPage;
+    return in_array($currentPage, $pages, true) ? 'bg-indigo-100 border-indigo-400 text-indigo-900 font-semibold' : 'bg-gray-100 border-gray-300 text-gray-800 hover:bg-gray-200';
+}
 ?>
 <nav class="mb-6 pb-4 border-b border-gray-200">
     <div class="flex items-center justify-between">
@@ -43,18 +48,27 @@ function navIsActive(string $page): string {
 
         <!-- Desktop Navigation Links -->
         <div class="hidden lg:flex items-center gap-2">
-            <a class="text-sm px-3 py-2 rounded-md border <?= navIsActive('index') ?>" href="<?= $baseUrl ?>index.php">
-                🔍 Arama
-            </a>
-            <a class="text-sm px-3 py-2 rounded-md border <?= navIsActive('channel') ?>" href="<?= $baseUrl ?>channel.php">
-                📺 Kanal
-            </a>
-            <a class="text-sm px-3 py-2 rounded-md border <?= navIsActive('analyze') ?>" href="<?= $baseUrl ?>analyze.php">
-                📊 Analiz
-            </a>
-            <a class="text-sm px-3 py-2 rounded-md border <?= navIsActive('history') ?>" href="<?= $baseUrl ?>history.php">
-                📜 Geçmiş
-            </a>
+            <div class="relative group">
+                <a class="text-sm px-3 py-2 rounded-md border inline-flex items-center gap-1 <?= navIsActiveAny(['index','channel','video']) ?>" href="<?= $baseUrl ?>index.php">
+                    🧭 Keşfet
+                    <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" clip-rule="evenodd"/></svg>
+                </a>
+                <div class="absolute right-0 top-full w-48 bg-white border border-gray-200 rounded-md shadow-lg hidden group-hover:block group-focus-within:block z-50">
+                    <a class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100" href="<?= $baseUrl ?>index.php">🔍 Arama</a>
+                    <a class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100" href="<?= $baseUrl ?>channel.php">📺 Kanal</a>
+                    <a class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100" href="<?= $baseUrl ?>video.php">🎬 Tekli Video</a>
+                </div>
+            </div>
+            <div class="relative group">
+                <a class="text-sm px-3 py-2 rounded-md border inline-flex items-center gap-1 <?= navIsActiveAny(['analyze','history']) ?>" href="<?= $baseUrl ?>analyze.php">
+                    📊 Analiz
+                    <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" clip-rule="evenodd"/></svg>
+                </a>
+                <div class="absolute right-0 top-full w-44 bg-white border border-gray-200 rounded-md shadow-lg hidden group-hover:block group-focus-within:block z-50">
+                    <a class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100" href="<?= $baseUrl ?>analyze.php">📊 Analiz</a>
+                    <a class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100" href="<?= $baseUrl ?>history.php">📜 Geçmiş</a>
+                </div>
+            </div>
 
             <?php if ($isAdmin): ?>
                 <a class="text-sm px-3 py-2 rounded-md border <?= navIsActive('settings') ?>" href="<?= $baseUrl ?>settings.php">
@@ -78,18 +92,28 @@ function navIsActive(string $page): string {
 
     <!-- Mobile Navigation Menu -->
     <div id="mobile-menu" class="hidden lg:hidden mt-4 space-y-2">
-        <a class="block text-sm px-4 py-2 rounded-md border <?= navIsActive('index') ?>" href="<?= $baseUrl ?>index.php">
-            🔍 Arama
-        </a>
-        <a class="block text-sm px-4 py-2 rounded-md border <?= navIsActive('channel') ?>" href="<?= $baseUrl ?>channel.php">
-            📺 Kanal
-        </a>
-        <a class="block text-sm px-4 py-2 rounded-md border <?= navIsActive('analyze') ?>" href="<?= $baseUrl ?>analyze.php">
-            📊 Analiz
-        </a>
-        <a class="block text-sm px-4 py-2 rounded-md border <?= navIsActive('history') ?>" href="<?= $baseUrl ?>history.php">
-            📜 Geçmiş
-        </a>
+        <div class="space-y-1">
+            <a class="block text-sm px-4 py-2 rounded-md border <?= navIsActiveAny(['index','channel','video']) ?>" href="<?= $baseUrl ?>index.php">
+                🧭 Keşfet
+            </a>
+            <a class="block text-sm px-6 py-2 rounded-md border <?= navIsActive('index') ?>" href="<?= $baseUrl ?>index.php">
+                ↳ 🔍 Arama
+            </a>
+            <a class="block text-sm px-6 py-2 rounded-md border <?= navIsActive('channel') ?>" href="<?= $baseUrl ?>channel.php">
+                ↳ 📺 Kanal
+            </a>
+            <a class="block text-sm px-6 py-2 rounded-md border <?= navIsActive('video') ?>" href="<?= $baseUrl ?>video.php">
+                ↳ 🎬 Tekli Video
+            </a>
+        </div>
+        <div class="space-y-1">
+            <a class="block text-sm px-4 py-2 rounded-md border <?= navIsActive('analyze') ?>" href="<?= $baseUrl ?>analyze.php">
+                📊 Analiz
+            </a>
+            <a class="block text-sm px-6 py-2 rounded-md border <?= navIsActive('history') ?>" href="<?= $baseUrl ?>history.php">
+                ↳ 📜 Geçmiş
+            </a>
+        </div>
 
         <?php if ($isAdmin): ?>
             <a class="block text-sm px-4 py-2 rounded-md border <?= navIsActive('settings') ?>" href="<?= $baseUrl ?>settings.php">

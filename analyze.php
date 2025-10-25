@@ -6,11 +6,13 @@ require_once __DIR__ . '/lib/Database.php';
 require_once __DIR__ . '/lib/Auth.php';
 require_once __DIR__ . '/lib/UserManager.php';
 require_once __DIR__ . '/lib/AIProvider.php';
+require_once __DIR__ . '/lib/DbMigrator.php';
 
 // Initialize database and session
 Database::init($config['database']);
 Auth::startSession($config['session']);
 Auth::requireLogin();
+DbMigrator::run();
 
 // Initialize AI Provider with fallback support
 $aiProvider = new AIProvider(
@@ -39,6 +41,19 @@ $saving = isset($_POST['save']) && $_POST['save'] === '1';
 $aiKey = (string)($config['ai_api_key'] ?? '');
 $aiEndpoint = (string)($config['ai_endpoint'] ?? '');
 $aiModel = (string)($config['ai_model'] ?? '');
+
+// Storage helper
+function storage_base_dir(): string {
+    $cfg = include __DIR__ . '/config.php';
+    $base = $cfg['storage_dir'] ?? (__DIR__ . '/output');
+    @mkdir($base, 0777, true);
+    if (!is_dir($base) || !is_writable($base)) {
+        $tmp = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'ymt-output';
+        @mkdir($tmp, 0777, true);
+        if (is_dir($tmp) && is_writable($tmp)) return $tmp;
+    }
+    return $base;
+}
 
 // Chat history management
 if (!isset($_SESSION['chat_history'])) {
@@ -113,7 +128,7 @@ if ($payload !== '') {
 
 // Get saved JSON files for selection
 function getSavedJsonFiles(): array {
-    $outputDir = __DIR__ . '/output';
+    $outputDir = storage_base_dir();
     $files = [];
 
     if (!is_dir($outputDir)) {
@@ -252,7 +267,8 @@ if ($customPrompt && $limited && (!$saving || $result === '')) {
         // Add custom prompt
         $messages[] = ['role' => 'user', 'content' => $customPrompt];
 
-        // Make API request with automatic fallback
+        // Make API request with automatic fallback (count as analysis query attempt)
+        UserManager::incrementAnalysisQueryCount(Auth::userId());
         $apiResult = $aiProvider->request($messages);
 
         if ($apiResult['success']) {
@@ -263,14 +279,18 @@ if ($customPrompt && $limited && (!$saving || $result === '')) {
             $_SESSION['chat_history'][] = ['role' => 'assistant', 'content' => $result];
             $chatHistory = $_SESSION['chat_history'];
 
-            // Increment analysis query count and log activity
-            UserManager::incrementAnalysisQueryCount(Auth::userId());
             UserManager::logActivity(Auth::userId(), 'analysis_query', [
                 'type' => 'custom_prompt',
-                'prompt_length' => strlen($customPrompt)
+                'prompt_length' => strlen($customPrompt),
+                'status' => 'success'
             ]);
         } else {
             $error = 'AI isteği başarısız oldu: ' . $apiResult['error'];
+            UserManager::logActivity(Auth::userId(), 'analysis_query', [
+                'type' => 'custom_prompt',
+                'prompt_length' => strlen($customPrompt),
+                'status' => 'failed'
+            ]);
         }
     }
 }
@@ -292,7 +312,8 @@ if ($followUp && !empty($chatHistory)) {
 
         $messages[] = ['role' => 'user', 'content' => $followUp];
 
-        // Make API request with automatic fallback
+        // Make API request with automatic fallback (count attempt)
+        UserManager::incrementAnalysisQueryCount(Auth::userId());
         $apiResult = $aiProvider->request($messages);
 
         if ($apiResult['success']) {
@@ -303,14 +324,18 @@ if ($followUp && !empty($chatHistory)) {
             $_SESSION['chat_history'][] = ['role' => 'assistant', 'content' => $result];
             $chatHistory = $_SESSION['chat_history'];
 
-            // Increment analysis query count and log activity
-            UserManager::incrementAnalysisQueryCount(Auth::userId());
             UserManager::logActivity(Auth::userId(), 'analysis_query', [
                 'type' => 'follow_up',
-                'question_length' => strlen($followUp)
+                'question_length' => strlen($followUp),
+                'status' => 'success'
             ]);
         } else {
             $error = 'AI isteği başarısız oldu: ' . $apiResult['error'];
+            UserManager::logActivity(Auth::userId(), 'analysis_query', [
+                'type' => 'follow_up',
+                'question_length' => strlen($followUp),
+                'status' => 'failed'
+            ]);
         }
     }
 }
@@ -376,8 +401,9 @@ if ($analysisType && $limited && (!$saving || $result === '')) {
                 ];
             }
         } else {
-            // No cache, make API request with automatic fallback
+            // No cache, make API request with automatic fallback (count attempt)
             $messages = [['role' => 'user', 'content' => $prompt]];
+            UserManager::incrementAnalysisQueryCount(Auth::userId());
             $apiResult = $aiProvider->request($messages);
 
             if ($apiResult['success']) {
@@ -412,14 +438,18 @@ if ($analysisType && $limited && (!$saving || $result === '')) {
                     ];
                 }
 
-                // Increment analysis query count and log activity
-                UserManager::incrementAnalysisQueryCount(Auth::userId());
                 UserManager::logActivity(Auth::userId(), 'analysis_query', [
                     'type' => $analysisType,
-                    'mode' => $mode
+                    'mode' => $mode,
+                    'status' => 'success'
                 ]);
             } else {
                 $error = 'AI isteği başarısız oldu: ' . $apiResult['error'];
+                UserManager::logActivity(Auth::userId(), 'analysis_query', [
+                    'type' => $analysisType,
+                    'mode' => $mode,
+                    'status' => 'failed'
+                ]);
             }
         }
     }
@@ -427,7 +457,7 @@ if ($analysisType && $limited && (!$saving || $result === '')) {
 
 // Kaydetme
 if ($result && $saving) {
-    $baseDir = __DIR__ . '/output';
+    $baseDir = storage_base_dir();
     @mkdir($baseDir, 0777, true);
     $ts = date('Ymd_His');
     $typeSlug = $analysisType ?: 'analysis';
@@ -447,7 +477,8 @@ if ($result && $saving) {
 
     // Save to file
     if (@file_put_contents($path, $result) !== false) {
-        $savedPath = 'ymt/output/' . basename(dirname($path)) . '/' . basename($path);
+        $rel = ltrim(str_replace($baseDir . '/', '', $path), '/');
+        $savedPath = 'serve-file.php?p=' . urlencode($rel);
 
         // Save to database
         try {

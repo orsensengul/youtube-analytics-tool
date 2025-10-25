@@ -4,6 +4,7 @@ declare(strict_types=1);
 $config = require __DIR__ . '/config.php';
 require_once __DIR__ . '/lib/Database.php';
 require_once __DIR__ . '/lib/Auth.php';
+require_once __DIR__ . '/lib/AppState.php';
 
 Database::init($config['database']);
 Auth::startSession($config['session']);
@@ -58,8 +59,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_prompt'])) {
     }
 }
 
+// Admin-only: offline mode toggle and storage directory
+if (Auth::isAdmin() && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['offline_toggle'])) {
+    $desired = ($_POST['offline'] ?? '') === '1';
+    if (AppState::setOffline($config, $desired)) {
+        $success = $desired ? 'Offline modu açıldı.' : 'Offline modu kapatıldı.';
+    } else {
+        $error = 'Offline modu güncellenemedi. Klasör izinlerini kontrol edin.';
+    }
+}
+
+$storage = AppState::storageStatus($config);
+$isOffline = AppState::isOffline($config);
+
 // Default prompts for each analysis type
 $defaultPrompts = [
+    // Single video analysis types
+    'title' => "Başlığı CTR odaklı iyileştir.\n- 10-20 yeni başlık önerisi üret\n- Numara ile listele\n- Türkçe, kısa ve vurucu olsun",
+    'description' => "Açıklamayı SEO ve izlenme açısından iyileştir.\n- 2-3 şablon öner\n- İlk 150 karakterde güçlü özet\n- Hashtag ve link yerleşimi öner",
+    'thumb-hook' => "Thumbnail metni/hook önerileri üret.\n- 10 kısa ve çarpıcı metin\n- 3-4 kelimeyi geçmesin\n- Türkçe ve vurucu",
     'descriptions' => "JSON içindeki description alanlarını incele.\n- Benzerlikler, farklılıklar, ortak temalar\n- SEO ve YouTube aranma açısından güçlü/zayıf yönler\n- Geliştirme önerileri\n- 2-3 örnek optimize açıklama şablonu\nKısa, maddeli ve somut öneriler ver.",
     'tags' => "JSON içindeki tags alanlarını analiz et.\n- En çok kullanılan etiketler, kümeler\n- Eksik/hatalı etiketler ve öneriler\n- Aranma niyeti (intent) odaklı tag önerileri\n- 10-20 yeni öneri tag listesi (TR odaklı)",
     'titles' => "JSON içindeki title alanlarını analiz et.\n- Öne çıkan kalıplar\n- CTR'ı artırma önerileri\n- 5-10 örnek yeni başlık önerisi",
@@ -73,6 +91,9 @@ $defaultPrompts = [
 ];
 
 $analysisLabels = [
+    'title' => '📌 Tekli Video — Başlık',
+    'description' => '📝 Tekli Video — Açıklama',
+    'thumb-hook' => '🖼️ Tekli Video — Thumbnail/Hook',
     'descriptions' => '📝 Açıklamalar Analizi',
     'tags' => '🏷️ Etiketler Analizi',
     'titles' => '📌 Başlıklar Analizi',
@@ -122,6 +143,26 @@ foreach ($prompts as $p) {
     <?php endif; ?>
 
     <!-- Analysis Prompts Section -->
+    <?php if (Auth::isAdmin()): ?>
+    <!-- Admin: Storage + Offline Mode -->
+    <div class="bg-white border border-gray-200 rounded-xl p-6 mb-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">🗃️ Depolama ve Offline Mod</h2>
+        <div class="text-sm text-gray-700 mb-3">Depolama klasörü: <code><?= e($storage['dir']) ?></code>
+            <span class="ml-2 inline-block px-2 py-0.5 rounded-full border <?= $storage['writable'] ? 'border-green-300 bg-green-50 text-green-700' : 'border-red-300 bg-red-50 text-red-700' ?>">
+                <?= $storage['writable'] ? 'Yazılabilir' : 'Yazılamaz' ?>
+            </span>
+        </div>
+        <form method="post" class="flex items-center gap-3">
+            <input type="hidden" name="offline_toggle" value="1">
+            <label class="flex items-center gap-2 text-sm text-gray-800">
+                <input type="checkbox" name="offline" value="1" <?= $isOffline ? 'checked' : '' ?>> Offline modu etkin
+            </label>
+            <button class="px-3 py-1.5 rounded-md border border-gray-300 bg-gray-100 hover:bg-gray-200" type="submit">Kaydet</button>
+        </form>
+        <p class="text-xs text-gray-500 mt-2">Offline modda ağ istekleri yapılmaz; yalnızca veritabanı/dosyalar kullanılır.</p>
+    </div>
+    <?php endif; ?>
+
     <div class="bg-white border border-gray-200 rounded-xl p-6">
         <h2 class="text-lg font-semibold text-gray-900 mb-4">📝 Analiz Prompt Şablonları</h2>
         <p class="text-sm text-gray-600 mb-6">

@@ -8,11 +8,19 @@ require_once __DIR__ . '/lib/Cache.php';
 require_once __DIR__ . '/lib/History.php';
 require_once __DIR__ . '/lib/UserManager.php';
 require_once __DIR__ . '/services/YoutubeService.php';
+require_once __DIR__ . '/lib/DbMigrator.php';
+require_once __DIR__ . '/lib/RapidApiClient.php';
+require_once __DIR__ . '/lib/AssetDownloader.php';
+require_once __DIR__ . '/services/TranscriptService.php';
+require_once __DIR__ . '/services/VideoAssetManager.php';
+require_once __DIR__ . '/lib/AppState.php';
 
 // Initialize database and session
 Database::init($config['database']);
 Auth::startSession($config['session']);
 Auth::requireLogin();
+// Auto-migrate DB schema (best-effort)
+DbMigrator::run();
 
 function e(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); }
 
@@ -79,6 +87,18 @@ $tagsByVideo = [];
 $detailsMap = [];
 $fromCache = false;
 $history = new History(Auth::userId());
+$tsService = null;
+if (!empty($rapidKey)) {
+    $transcriptHost = $config['transcript_api_host'] ?? 'youtube-transcripts.p.rapidapi.com';
+    $tsService = new TranscriptService(
+        new RapidApiClient($rapidKey, $rapidHost),
+        $rapidHost,
+        new RapidApiClient($rapidKey, $transcriptHost),
+        $transcriptHost
+    );
+}
+$offline = AppState::isOffline($config);
+$sourceLabel = '';
 
 if ($query !== '') {
     // Check data query limit
@@ -95,10 +115,29 @@ if ($query !== '') {
         $cached = $cache->get($cacheKey, $cacheTtl);
         if ($cached) {
             $fromCache = true;
+            $sourceLabel = 'Cache';
             $search = $cached['search'] ?? [];
             $results = $cached['results'] ?? [];
             $detailsMap = $cached['detailsMap'] ?? [];
             $tagsByVideo = $cached['tagsByVideo'] ?? [];
+
+            // Geçmişe kaydet (cache'den okunsa da)
+            try {
+                $ids = [];
+                foreach ($results as $it) {
+                    $vid = get_id_from_item((array)$it);
+                    if ($vid) $ids[] = $vid;
+                }
+                $history->addSearch($query, [
+                    'type' => 'keyword',
+                    'host' => $rapidHost,
+                    'region' => $regionCode,
+                    'count' => count($results),
+                    'ids' => $ids,
+                ]);
+            } catch (Exception $e) {}
+            // Otomatik Thumbnail/Transkript topla
+            auto_collect_assets($results, $detailsMap, $rapidHost, $tsService);
 
             // Cache'den gelen sonuçlar için de JSON kaydet
             $nowIso = date('c');
@@ -154,7 +193,52 @@ if ($query !== '') {
             ];
             autoSaveJson($query, $sort, 'full', $fullJsonData);
         } else {
-            $search = $yt->search($query, $maxResults, $regionCode);
+            if ($offline) {
+                // Try to load from saved JSON files under storage_dir/search_<slug>/full or /short
+                $offlineLoaded = load_offline_saved_search($query);
+                if ($offlineLoaded) {
+                    $fromCache = true;
+                    $sourceLabel = 'Offline';
+                    $search = ['offline' => true];
+                    $results = $offlineLoaded['results'];
+                    $detailsMap = $offlineLoaded['detailsMap'];
+                    $tagsByVideo = $offlineLoaded['tagsByVideo'];
+                    // Also add to history
+                    try {
+                        $ids = [];
+                        foreach ($results as $it) { $vid = get_id_from_item((array)$it); if ($vid) $ids[] = $vid; }
+                        $history->addSearch($query, [
+                            'type' => 'keyword', 'host' => $rapidHost, 'region' => $regionCode,
+                            'count' => count($results), 'ids' => $ids,
+                        ]);
+                    } catch (Exception $e) {}
+                } else {
+                    $error = 'Offline mod: Kayıtlı arama bulunamadı.';
+                    $search = [];
+                }
+            } else {
+                // Online mod: önce kayıtlı JSON var mı kontrol et
+                $saved = load_offline_saved_search($query);
+                if ($saved) {
+                    $fromCache = true;
+                    $sourceLabel = 'Offline';
+                    $search = ['offline' => true];
+                    $results = $saved['results'];
+                    $detailsMap = $saved['detailsMap'];
+                    $tagsByVideo = $saved['tagsByVideo'];
+                    try {
+                        $ids = [];
+                        foreach ($results as $it) { $vid = get_id_from_item((array)$it); if ($vid) $ids[] = $vid; }
+                        $history->addSearch($query, [
+                            'type' => 'keyword', 'host' => $rapidHost, 'region' => $regionCode,
+                            'count' => count($results), 'ids' => $ids,
+                        ]);
+                    } catch (Exception $e) {}
+                } else {
+                    $search = $yt->search($query, $maxResults, $regionCode);
+                    $sourceLabel = 'API';
+                }
+            }
         }
         if (!empty($search['error'])) {
             $error = 'Arama sırasında hata: ' . e((string)$search['error']);
@@ -194,7 +278,7 @@ if ($query !== '') {
                     if ($id) $videoIds[] = $id;
                 }
                 if ($videoIds) {
-                    $detailsMap = $yt->videosDetails($videoIds);
+                    $detailsMap = $offline ? [] : $yt->videosDetails($videoIds);
                     if (isset($detailsMap['error'])) {
                         $error = 'Video detayları alınamadı: ' . e((string)$detailsMap['error']);
                     } else {
@@ -218,6 +302,9 @@ if ($query !== '') {
                             'query' => $query,
                             'results' => count($results)
                         ]);
+
+                        // Otomatik Thumbnail ve Transkript alma + DB'ye yazma
+                        auto_collect_assets($results, $detailsMap, $rapidHost, $tsService);
 
                         if ($cacheTtl > 0) {
                             $cache->set($cacheKey, [
@@ -290,7 +377,7 @@ if ($query !== '') {
 
 // Otomatik JSON kaydetme fonksiyonu
 function autoSaveJson(string $query, string $sort, string $variant, array $data): void {
-    $baseDir = __DIR__ . '/output';
+    $baseDir = storage_base_dir();
     $qSlug = slugify($query);
     $dir = $baseDir . '/search_' . $qSlug . '/' . $variant;
     @mkdir($dir, 0777, true);
@@ -310,6 +397,152 @@ function slugify(string $s): string {
     return $s ?: 'untitled';
 }
 
+function storage_base_dir(): string {
+    $cfg = include __DIR__ . '/config.php';
+    $base = $cfg['storage_dir'] ?? (__DIR__ . '/output');
+    @mkdir($base, 0777, true);
+    if (!is_dir($base) || !is_writable($base)) {
+        $tmp = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'ymt-output';
+        @mkdir($tmp, 0777, true);
+        if (is_dir($tmp) && is_writable($tmp)) return $tmp;
+    }
+    return $base;
+}
+
+function pick_thumb_url_from_details(array $raw, string $videoId): string {
+    if (!empty($raw['thumbnails'])) {
+        $t = $raw['thumbnails'];
+        if (is_array($t)) {
+            foreach (['maxres','maxresdefault','high','hqdefault','standard','sddefault','medium','mqdefault','default'] as $k) {
+                if (isset($t[$k]['url'])) return (string)$t[$k]['url'];
+            }
+            foreach ($t as $it) if (is_array($it) && !empty($it['url'])) return (string)$it['url'];
+        }
+    }
+    return 'https://i.ytimg.com/vi/' . $videoId . '/hqdefault.jpg';
+}
+
+function auto_collect_assets(array $results, array $detailsMap, string $host, ?TranscriptService $tsService): void {
+    foreach ($results as $it) {
+        $vid = get_id_from_item((array)$it);
+        if (!$vid) continue;
+
+        // Ensure video metadata row
+        $raw = $detailsMap[$vid]['raw'] ?? [];
+        $title = $raw['title'] ?? '';
+        $desc = $raw['description'] ?? '';
+        $channelTitle = $raw['channelTitle'] ?? ($raw['channel']['title'] ?? '');
+        $published = $detailsMap[$vid]['snippet']['publishedAt'] ?? ($raw['publishDate'] ?? null);
+        $tags = $detailsMap[$vid]['snippet']['tags'] ?? [];
+        $thumbs = $raw['thumbnails'] ?? null;
+        VideoAssetManager::ensureVideo($vid, [
+            'title' => $title,
+            'description' => $desc,
+            'channel_title' => $channelTitle,
+            'published_at' => $published,
+            'tags' => $tags,
+            'thumbnails' => $thumbs,
+            'raw' => $raw,
+        ]);
+
+        // Thumbnail download if not exists
+        // Save thumbnail into the video's own folder
+        $dir = storage_base_dir() . '/video_' . $vid;
+        @mkdir($dir, 0777, true);
+        $thumbPath = $dir . '/' . $vid . '.jpg';
+        if (!is_file($thumbPath)) {
+            $thumbUrl = pick_thumb_url_from_details($raw, $vid);
+            $dl = AssetDownloader::download($thumbUrl, $thumbPath);
+            if ($dl['success']) {
+                VideoAssetManager::saveThumbPath($vid, $thumbPath);
+            }
+        } else {
+            VideoAssetManager::saveThumbPath($vid, $thumbPath);
+        }
+
+        // Transcript fetch (counts towards data limit) if not existing
+        if ($tsService) {
+            $dir = storage_base_dir() . '/video_' . $vid;
+            @mkdir($dir, 0777, true);
+            $existingTxt = glob($dir . '/*_transcript.txt');
+            if (!$existingTxt) {
+                if (UserManager::checkDataQueryLimit(Auth::userId())) {
+                    $res = $tsService->getTranscript($vid, ['tr','en']);
+                    if ($res['success']) {
+                        $l = $res['lang'] ?: 'auto';
+                        $jsonPath = $dir . '/' . $vid . '_transcript.json';
+                        $txtPath = $dir . '/' . $vid . '_transcript.txt';
+                        @file_put_contents($jsonPath, json_encode(['segments' => $res['segments']], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+                        @file_put_contents($txtPath, $res['text']);
+                        $prov = $res['provider'] ?? $host;
+                        VideoAssetManager::saveTranscriptPaths($vid, $l, $jsonPath, $txtPath, $prov);
+                        UserManager::incrementDataQueryCount(Auth::userId());
+                        UserManager::logActivity(Auth::userId(), 'fetch_transcript', ['videoId' => $vid, 'lang' => $l]);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Load last saved search JSON (full preferred) for offline usage
+function load_offline_saved_search(string $query): ?array {
+    $base = storage_base_dir();
+    $slug = slugify($query);
+    $dirs = [
+        $base . '/search_' . $slug . '/full',
+        $base . '/search_' . $slug . '/short',
+    ];
+    $latest = null; $latestMTime = 0;
+    foreach ($dirs as $d) {
+        if (!is_dir($d)) continue;
+        foreach (glob($d . '/*.json') ?: [] as $f) {
+            $t = @filemtime($f) ?: 0;
+            if ($t > $latestMTime) { $latest = $f; $latestMTime = $t; }
+        }
+    }
+    if (!$latest) return null;
+    $raw = @file_get_contents($latest); if ($raw === false) return null;
+    $data = json_decode($raw, true); if (!is_array($data)) return null;
+    $items = $data['items'] ?? [];
+    if (!is_array($items)) $items = [];
+    $results = [];
+    $detailsMap = [];
+    $tagsByVideo = [];
+    foreach ($items as $it) {
+        $id = $it['id'] ?? ($it['raw']['details']['id'] ?? ($it['raw']['listItem']['id']['videoId'] ?? null));
+        if (!$id && isset($it['raw']['listItem'])) {
+            $lid = $it['raw']['listItem'];
+            $id = $lid['id']['videoId'] ?? ($lid['videoId'] ?? ($lid['id'] ?? null));
+        }
+        if (!$id) continue;
+        // Prefer original list item if present
+        $listItem = $it['raw']['listItem'] ?? null;
+        if (is_array($listItem)) {
+            $results[] = $listItem;
+        } else {
+            // Minimal stub
+            $results[] = [
+                'id' => ['videoId' => $id],
+                'title' => $it['title'] ?? '',
+                'channelTitle' => $it['channel']['title'] ?? ($it['channelTitle'] ?? ''),
+                'description' => $it['description'] ?? '',
+            ];
+        }
+        if (isset($it['raw']['details']) && is_array($it['raw']['details'])) {
+            $detailsMap[$id] = $it['raw']['details'];
+        }
+        if (isset($it['tags']) && is_array($it['tags'])) {
+            $tagsByVideo[$id] = $it['tags'];
+        }
+    }
+    return [
+        'results' => $results,
+        'detailsMap' => $detailsMap,
+        'tagsByVideo' => $tagsByVideo,
+    ];
+}
+
 ?><!doctype html>
 <html lang="tr">
 <head>
@@ -325,7 +558,15 @@ function slugify(string $s): string {
 
         <div class="flex items-center justify-between mb-3">
             <?php if ($query !== '' && !$error): ?>
-                <h2 class="text-lg font-medium text-gray-700">Sonuçlar: "<?= e($query) ?>"</h2>
+                <h2 class="text-lg font-medium text-gray-700">Sonuçlar: "<?= e($query) ?>"
+                    <?php if (class_exists('Auth') && Auth::isAdmin() && $sourceLabel): ?>
+                        <span class="ml-2 text-xs inline-block px-2 py-0.5 rounded-full border <?php
+                            echo $sourceLabel==='API' ? 'border-green-300 bg-green-50 text-green-700'
+                                : ($sourceLabel==='Cache' ? 'border-blue-300 bg-blue-50 text-blue-700'
+                                : 'border-yellow-300 bg-yellow-50 text-yellow-800');
+                        ?>">Kaynak: <?= e($sourceLabel) ?></span>
+                    <?php endif; ?>
+                </h2>
                 <div class="flex gap-2">
                     <button class="px-3 py-1 rounded-md border border-indigo-300 bg-indigo-600 text-white hover:bg-indigo-500" type="button" onclick="analyzeSearchNow()">📊 Analiz Et</button>
                 </div>
@@ -427,6 +668,9 @@ function slugify(string $s): string {
                                 <?php else: ?>
                                     <div class="no-tags text-xs text-gray-500">Etiket bulunamadı.</div>
                                 <?php endif; ?>
+                                <div class="pt-2">
+                                    <a class="inline-flex items-center px-3 py-1.5 rounded-md border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-xs" href="video.php?id=<?= e($id) ?>&back=<?= e(urlencode($_SERVER['REQUEST_URI'] ?? 'index.php')) ?>">🔎 Bu Videoyu Analiz Et</a>
+                                </div>
                             </div>
                         </div>
                     <?php endforeach; ?>

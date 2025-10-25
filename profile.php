@@ -42,6 +42,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['change_password'])) {
 }
 
 $stats = UserManager::getUserStats($userId);
+$todayStart = date('Y-m-d 00:00:00');
+$monthStart = date('Y-m-01 00:00:00');
+// Güvenli sayaçlar: activity log'dan hesapla (API kullanan sorgular + transkript)
+$actionsData = ['query_search','query_channel','fetch_transcript'];
+$actionsAnalysis = ['analysis_query','video_analysis'];
+// Helper: COUNT(*)
+$countBy = function(array $actions, string $from) use ($userId) {
+    $placeholders = implode(',', array_fill(0, count($actions), '?'));
+    $params = $actions; // action types
+    array_unshift($params, $userId);
+    $sql = "SELECT COUNT(*) AS c FROM user_activity_log WHERE user_id = ? AND action_type IN ($placeholders) AND created_at >= ?";
+    $params[] = $from;
+    $row = Database::selectOne($sql, $params);
+    return (int)($row['c'] ?? 0);
+};
+$dataToday = $countBy($actionsData, $todayStart);
+$dataMonth = $countBy($actionsData, $monthStart);
+$analysisToday = $countBy($actionsAnalysis, $todayStart);
+$analysisMonth = $countBy($actionsAnalysis, $monthStart);
+// Totals
+$dataTotal = $countBy($actionsData, '1970-01-01 00:00:00');
+$analysisTotal = $countBy($actionsAnalysis, '1970-01-01 00:00:00');
 $licenseInfo = UserManager::getLicenseInfo($userId);
 $recentActivity = UserManager::getUserActivity($userId, ['limit' => 10]);
 
@@ -160,21 +182,21 @@ $recentActivity = UserManager::getUserActivity($userId, ['limit' => 10]);
                 <h3 class="text-md font-medium text-gray-800 mb-3">📊 Veri Sorguları (Arama & Kanal)</h3>
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div class="text-center p-4 bg-blue-50 rounded-lg">
-                        <div class="text-3xl font-bold text-blue-900"><?= $stats['data_queries_today'] ?></div>
+                        <div class="text-3xl font-bold text-blue-900"><?= $dataToday ?></div>
                         <div class="text-xs text-blue-700 mt-1">Bugünkü Sorgu</div>
                         <?php if ($stats['data_query_limit_daily'] !== -1): ?>
                             <div class="text-xs text-blue-600 mt-1">/ <?= $stats['data_query_limit_daily'] ?> limit</div>
                         <?php endif; ?>
                     </div>
                     <div class="text-center p-4 bg-green-50 rounded-lg">
-                        <div class="text-3xl font-bold text-green-900"><?= $stats['data_queries_month'] ?></div>
+                        <div class="text-3xl font-bold text-green-900"><?= $dataMonth ?></div>
                         <div class="text-xs text-green-700 mt-1">Bu Ay</div>
                         <?php if ($stats['data_query_limit_monthly'] !== -1): ?>
                             <div class="text-xs text-green-600 mt-1">/ <?= $stats['data_query_limit_monthly'] ?> limit</div>
                         <?php endif; ?>
                     </div>
                     <div class="text-center p-4 bg-purple-50 rounded-lg">
-                        <div class="text-3xl font-bold text-purple-900"><?= $stats['data_queries_total'] ?></div>
+                        <div class="text-3xl font-bold text-purple-900"><?= $dataTotal ?></div>
                         <div class="text-xs text-purple-700 mt-1">Toplam Sorgu</div>
                     </div>
                     <div class="text-center p-4 bg-orange-50 rounded-lg">
@@ -191,21 +213,21 @@ $recentActivity = UserManager::getUserActivity($userId, ['limit' => 10]);
                 <h3 class="text-md font-medium text-gray-800 mb-3">🤖 Analiz Sorguları (AI)</h3>
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div class="text-center p-4 bg-indigo-50 rounded-lg">
-                        <div class="text-3xl font-bold text-indigo-900"><?= $stats['analysis_queries_today'] ?></div>
+                        <div class="text-3xl font-bold text-indigo-900"><?= $analysisToday ?></div>
                         <div class="text-xs text-indigo-700 mt-1">Bugünkü Analiz</div>
                         <?php if ($stats['analysis_query_limit_daily'] !== -1): ?>
                             <div class="text-xs text-indigo-600 mt-1">/ <?= $stats['analysis_query_limit_daily'] ?> limit</div>
                         <?php endif; ?>
                     </div>
                     <div class="text-center p-4 bg-teal-50 rounded-lg">
-                        <div class="text-3xl font-bold text-teal-900"><?= $stats['analysis_queries_month'] ?></div>
+                        <div class="text-3xl font-bold text-teal-900"><?= $analysisMonth ?></div>
                         <div class="text-xs text-teal-700 mt-1">Bu Ay</div>
                         <?php if ($stats['analysis_query_limit_monthly'] !== -1): ?>
                             <div class="text-xs text-teal-600 mt-1">/ <?= $stats['analysis_query_limit_monthly'] ?> limit</div>
                         <?php endif; ?>
                     </div>
                     <div class="text-center p-4 bg-pink-50 rounded-lg">
-                        <div class="text-3xl font-bold text-pink-900"><?= $stats['analysis_queries_total'] ?></div>
+                        <div class="text-3xl font-bold text-pink-900"><?= $analysisTotal ?></div>
                         <div class="text-xs text-pink-700 mt-1">Toplam Analiz</div>
                     </div>
                     <div class="text-center p-4 bg-amber-50 rounded-lg">
@@ -242,7 +264,7 @@ $recentActivity = UserManager::getUserActivity($userId, ['limit' => 10]);
                     <div>
                         <label class="block text-sm font-medium text-gray-600 mb-1">Bitiş Tarihi</label>
                         <div class="text-gray-900 font-medium">
-                            <?= date('d.m.Y H:i', strtotime($licenseInfo['expires_at'])) ?>
+                            <?= !empty($licenseInfo['expires_at']) ? date('d.m.Y H:i', strtotime($licenseInfo['expires_at'])) : '-' ?>
                         </div>
                     </div>
                     <div>
@@ -272,7 +294,10 @@ $recentActivity = UserManager::getUserActivity($userId, ['limit' => 10]);
                                         'logout' => '🚪 Çıkış yapıldı',
                                         'query_search' => '🔍 Arama yapıldı',
                                         'query_channel' => '📺 Kanal analizi yapıldı',
-                                        'analysis_query' => '🤖 AI analizi yapıldı',
+                                        'analysis_query' => '🤖 Analiz isteği gönderildi',
+                                        'video_analysis' => '🤖 Tekli video analizi yapıldı',
+                                        'fetch_transcript' => '📝 Transkript alındı',
+                                        'fetch_thumbnail' => '🖼️ Thumbnail indirildi',
                                         'password_change' => '🔑 Şifre değiştirildi',
                                         'user_updated' => '✏️ Profil güncellendi',
                                         'user_created' => '👤 Kullanıcı oluşturuldu',
@@ -283,7 +308,13 @@ $recentActivity = UserManager::getUserActivity($userId, ['limit' => 10]);
                                 <?php if ($activity['details']): ?>
                                     <?php $details = json_decode($activity['details'], true); ?>
                                     <?php if (isset($details['query'])): ?>
-                                        <span class="text-xs text-gray-500 ml-2">"<?= e($details['query']) ?>"</span>
+                                        <span class="text-xs text-gray-500 ml-2">"<?= e((string)$details['query']) ?>"</span>
+                                    <?php endif; ?>
+                                    <?php if ($activity['action_type']==='query_channel' && isset($details['channel_id'])): ?>
+                                        <span class="text-xs text-gray-500 ml-2">(Kanal: <?= e((string)$details['channel_id']) ?>)</span>
+                                    <?php endif; ?>
+                                    <?php if ($activity['action_type']==='fetch_transcript' && isset($details['videoId'])): ?>
+                                        <span class="text-xs text-gray-500 ml-2">(Transkript: <?= e((string)$details['videoId']) ?><?= isset($details['lang'])? ', ' . e((string)$details['lang']) : '' ?>)</span>
                                     <?php endif; ?>
                                 <?php endif; ?>
                             </div>
